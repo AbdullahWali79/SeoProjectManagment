@@ -63,23 +63,80 @@ export function AdminView({
 
   return (
     <>
+      <section className="panel admin-hero mb-4">
+        <div className="row g-4 align-items-stretch">
+          <div className="col-xl-7">
+            <div className="admin-hero-copy">
+              <p className="eyebrow">Operations cockpit</p>
+              <h2>Keep client delivery, assignments, and reporting inside one colorful control room.</h2>
+              <p className="subtle">
+                Jump between project portfolio, execution queue, daily reports, and team updates without losing context.
+              </p>
+              <div className="admin-hero-actions d-flex flex-wrap gap-2">
+                <a className="button button-secondary compact-button btn btn-primary" href="#admin-reports">
+                  Open daily reports
+                </a>
+                <a className="button button-ghost compact-button btn btn-light" href="#admin-queue">
+                  View execution queue
+                </a>
+                <a className="button button-ghost compact-button btn btn-light" href="#admin-projects">
+                  Review projects
+                </a>
+              </div>
+            </div>
+          </div>
+          <div className="col-xl-5">
+            <div className="row g-3 h-100">
+              <div className="col-sm-6">
+                <div className="admin-mini-card admin-mini-card-primary h-100">
+                  <span className="eyebrow">Report coverage</span>
+                  <strong>{reportSummary.reportsCount}</strong>
+                  <p>Daily reports already saved for the selected date.</p>
+                </div>
+              </div>
+              <div className="col-sm-6">
+                <div className="admin-mini-card admin-mini-card-warm h-100">
+                  <span className="eyebrow">Team active</span>
+                  <strong>{stats.activeEmployees}</strong>
+                  <p>Employees currently visible in the delivery workflow.</p>
+                </div>
+              </div>
+              <div className="col-sm-6">
+                <div className="admin-mini-card h-100">
+                  <span className="eyebrow">Projects tracked</span>
+                  <strong>{stats.totalProjects}</strong>
+                  <p>Client workspaces now moving through your dashboard.</p>
+                </div>
+              </div>
+              <div className="col-sm-6">
+                <div className="admin-mini-card h-100">
+                  <span className="eyebrow">Hours logged</span>
+                  <strong>{reportSummary.totalHours}</strong>
+                  <p>Reported hours ready to reuse in the next client call.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="grid grid-4 stat-grid">
-        <div className="panel stat-card">
+        <div className="panel stat-card stat-card-projects">
           <p className="eyebrow">Projects</p>
           <p className="metric">{stats.totalProjects}</p>
           <p className="subtle">Client workspaces currently tracked.</p>
         </div>
-        <div className="panel stat-card">
+        <div className="panel stat-card stat-card-tasks">
           <p className="eyebrow">Open tasks</p>
           <p className="metric">{stats.openTasks}</p>
           <p className="subtle">Tasks still moving across the team.</p>
         </div>
-        <div className="panel stat-card">
+        <div className="panel stat-card stat-card-team">
           <p className="eyebrow">Employees</p>
           <p className="metric">{stats.activeEmployees}</p>
           <p className="subtle">Active executors under your account.</p>
         </div>
-        <div className="panel stat-card">
+        <div className="panel stat-card stat-card-hours">
           <p className="eyebrow">Hours today</p>
           <p className="metric">{stats.todayHours}</p>
           <p className="subtle">Reported work already ready for client reporting.</p>
@@ -88,7 +145,7 @@ export function AdminView({
 
       <section className="dashboard-grid">
         <div className="primary-column stack">
-          <section className="panel section table-section">
+          <section id="admin-projects" className="panel section table-section">
             <div className="section-head">
               <div className="section-copy">
                 <p className="eyebrow">Portfolio overview</p>
@@ -99,7 +156,7 @@ export function AdminView({
               </div>
             </div>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Project</th>
@@ -137,7 +194,7 @@ export function AdminView({
             </div>
           </section>
 
-          <section className="panel section table-section">
+          <section id="admin-queue" className="panel section table-section">
             <div className="section-head">
               <div className="section-copy">
                 <p className="eyebrow">Execution queue</p>
@@ -148,7 +205,7 @@ export function AdminView({
               </div>
             </div>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Task</th>
@@ -183,7 +240,7 @@ export function AdminView({
             </div>
           </section>
 
-          <section className="panel section table-section">
+          <section id="admin-reports" className="panel section table-section">
             <div className="section-head">
               <div className="section-copy">
                 <p className="eyebrow">Team reporting</p>
@@ -197,23 +254,23 @@ export function AdminView({
                   <label className="label" htmlFor="reportDate">
                     Report date
                   </label>
-                  <select id="reportDate" name="reportDate" className="select compact-select" defaultValue={activeReportDate}>
+                  <select id="reportDate" name="reportDate" className="select compact-select form-select" defaultValue={activeReportDate}>
                     {availableReportDates.map((date) => (
                       <option key={date} value={date}>
                         {date}
                       </option>
                     ))}
                   </select>
-                  <button className="button button-ghost compact-button" type="submit">
+                  <button className="button button-ghost compact-button btn btn-light" type="submit">
                     Apply
                   </button>
                 </form>
                 <div className="toolbar-actions">
-                  <a className="button button-secondary compact-button" href={`/dashboard/reports/export?date=${reportDateQuery}`}>
+                  <a className="button button-secondary compact-button btn btn-primary" href={`/dashboard/reports/export?date=${reportDateQuery}`}>
                     Export Excel
                   </a>
                   <a
-                    className="button button-ghost compact-button"
+                    className="button button-ghost compact-button btn btn-light"
                     href={`/dashboard/reports/print?date=${reportDateQuery}`}
                     target="_blank"
                     rel="noreferrer"
@@ -230,7 +287,7 @@ export function AdminView({
               <span className="pill pill-status-done">{reportSummary.reportsCount} daily reports</span>
             </div>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -267,7 +324,7 @@ export function AdminView({
             </div>
           </section>
 
-          <section className="panel section table-section">
+          <section id="admin-activity" className="panel section table-section">
             <div className="section-head">
               <div className="section-copy">
                 <p className="eyebrow">Activity stream</p>
@@ -276,7 +333,7 @@ export function AdminView({
               </div>
             </div>
             <div className="table-wrap">
-              <table className="table">
+              <table className="table table-hover align-middle mb-0">
                 <thead>
                   <tr>
                     <th>Employee</th>

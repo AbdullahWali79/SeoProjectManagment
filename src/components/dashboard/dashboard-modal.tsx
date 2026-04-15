@@ -39,7 +39,7 @@ export function DashboardModal({
             <h3>{title}</h3>
             <p className="subtle">{description}</p>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close modal">
+          <button type="button" className="modal-close btn btn-outline-secondary" onClick={onClose} aria-label="Close modal">
             Close
           </button>
         </div>

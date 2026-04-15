@@ -11,7 +11,7 @@ function SubmitButton() {
   const { pending } = useFormStatus();
 
   return (
-    <button type="submit" className="button button-primary" disabled={pending}>
+    <button type="submit" className="button button-primary btn btn-warning w-100" disabled={pending}>
       {pending ? "Signing in..." : "Open dashboard"}
     </button>
   );
@@ -26,14 +26,14 @@ export function LoginForm() {
         <label className="label" htmlFor="email">
           Email
         </label>
-        <input id="email" name="email" type="email" className="input" defaultValue="admin@agency.local" />
+        <input id="email" name="email" type="email" className="input form-control" defaultValue="admin@agency.local" />
       </div>
 
       <div className="field">
         <label className="label" htmlFor="password">
           Password
         </label>
-        <input id="password" name="password" type="password" className="input" defaultValue="Passw0rd!" />
+        <input id="password" name="password" type="password" className="input form-control" defaultValue="Passw0rd!" />
       </div>
 
       {state.error ? (

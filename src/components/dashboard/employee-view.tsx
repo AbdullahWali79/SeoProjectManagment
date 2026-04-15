@@ -73,7 +73,7 @@ export function EmployeeView({
                     <label className="label" htmlFor={`status-${task.id}`}>
                       Status
                     </label>
-                    <select id={`status-${task.id}`} name="status" className="select" defaultValue={task.status}>
+                    <select id={`status-${task.id}`} name="status" className="select form-select" defaultValue={task.status}>
                       <option value="todo">To do</option>
                       <option value="in_progress">In progress</option>
                       <option value="blocked">Blocked</option>
@@ -91,7 +91,7 @@ export function EmployeeView({
                       type="number"
                       step="0.5"
                       min="0"
-                      className="input"
+                      className="input form-control"
                       defaultValue="0.5"
                     />
                   </div>
@@ -102,7 +102,7 @@ export function EmployeeView({
                     <textarea
                       id={`outcome-${task.id}`}
                       name="outcome"
-                      className="textarea"
+                      className="textarea form-control"
                       defaultValue={task.resultNote}
                     />
                   </div>
@@ -113,12 +113,12 @@ export function EmployeeView({
                     <textarea
                       id={`blockers-${task.id}`}
                       name="blockers"
-                      className="textarea"
+                      className="textarea form-control"
                       placeholder="Optional blockers or dependency notes"
                     />
                   </div>
                   <div className="field field-full">
-                    <button className="button button-primary" type="submit">
+                    <button className="button button-primary btn btn-warning" type="submit">
                       Save task update
                     </button>
                   </div>

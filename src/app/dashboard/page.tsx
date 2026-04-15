@@ -30,27 +30,60 @@ export default async function DashboardPage({
 
   const adminData = user.role === "admin" ? await getAdminDashboardData(reportDate) : null;
   const employeeData = user.role === "employee" ? await getEmployeeDashboardData(user.id) : null;
+  const heroPrimaryMetric =
+    user.role === "admin"
+      ? `${adminData?.stats.openTasks ?? 0}`
+      : `${employeeData?.tasks.filter((task) => task.status !== "done").length ?? 0}`;
+  const heroPrimaryLabel = user.role === "admin" ? "Open tasks in motion" : "Assigned tasks in motion";
+  const heroSecondaryMetric =
+    user.role === "admin"
+      ? `${adminData?.stats.todayHours ?? 0}`
+      : `${employeeData?.reports.length ?? 0}`;
+  const heroSecondaryLabel = user.role === "admin" ? "Hours logged today" : "Reports submitted";
 
   return (
-    <main className="shell">
-      <div className="topbar">
-        <div className="brand">
+    <main className="shell dashboard-shell">
+      <section className={`panel dashboard-banner ${user.role === "admin" ? "dashboard-banner-admin" : "dashboard-banner-employee"}`}>
+        <div className="row g-4 align-items-center">
+          <div className="col-xl-8">
+            <div className="brand">
           <p className="eyebrow">{user.role === "admin" ? "Admin workspace" : "Employee workspace"}</p>
-          <h1 className="display" style={{ fontSize: "clamp(2rem, 3vw, 3.2rem)" }}>
-            {user.role === "admin"
-              ? "Manage projects, tasks, reports, and client progress in one place."
-              : "Update assigned SEO tasks and submit your daily report."}
-          </h1>
-          <p className="subtle" style={{ maxWidth: 780 }}>
-            Signed in as <strong>{user.fullName}</strong> ({user.email})
-          </p>
+              <h1 className="display dashboard-banner-title">
+                {user.role === "admin"
+                  ? "Manage projects, tasks, reports, and client progress in one place."
+                  : "Update assigned SEO tasks and submit your daily report."}
+              </h1>
+              <p className="dashboard-banner-copy">
+                Signed in as <strong>{user.fullName}</strong> ({user.email})
+              </p>
+              <div className="dashboard-banner-tags d-flex flex-wrap gap-2">
+                <span className="dashboard-tag">Client reporting</span>
+                <span className="dashboard-tag">Task control</span>
+                <span className="dashboard-tag">Daily visibility</span>
+              </div>
+            </div>
+          </div>
+          <div className="col-xl-4">
+            <div className="dashboard-banner-side">
+              <div className="dashboard-kpi-grid">
+                <div className="dashboard-kpi">
+                  <span className="dashboard-kpi-label">{heroPrimaryLabel}</span>
+                  <strong className="dashboard-kpi-value">{heroPrimaryMetric}</strong>
+                </div>
+                <div className="dashboard-kpi">
+                  <span className="dashboard-kpi-label">{heroSecondaryLabel}</span>
+                  <strong className="dashboard-kpi-value">{heroSecondaryMetric}</strong>
+                </div>
+              </div>
+              <form action={logoutAction}>
+                <button className="button button-ghost btn btn-light btn-lg w-100 shadow-sm" type="submit">
+                  Sign out
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
-        <form action={logoutAction}>
-          <button className="button button-ghost" type="submit">
-            Sign out
-          </button>
-        </form>
-      </div>
+      </section>
 
       <MessageNotice message={message} />
 

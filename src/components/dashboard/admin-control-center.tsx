@@ -155,31 +155,31 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-fullName">
                 Full name
               </label>
-              <input id="modal-fullName" name="fullName" className="input" />
+              <input id="modal-fullName" name="fullName" className="input form-control" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-email">
                 Email
               </label>
-              <input id="modal-email" name="email" type="email" className="input" />
+              <input id="modal-email" name="email" type="email" className="input form-control" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-password">
                 Password
               </label>
-              <input id="modal-password" name="password" type="password" className="input" defaultValue="Passw0rd!" />
+              <input id="modal-password" name="password" type="password" className="input form-control" defaultValue="Passw0rd!" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-role">
                 Role
               </label>
-              <select id="modal-role" name="role" className="select" defaultValue="employee">
+              <select id="modal-role" name="role" className="select form-select" defaultValue="employee">
                 <option value="admin">Admin</option>
                 <option value="employee">Employee</option>
               </select>
             </div>
             <div className="field field-full">
-              <button className="button button-secondary" type="submit">
+              <button className="button button-secondary btn btn-primary" type="submit">
                 Save user
               </button>
             </div>
@@ -198,25 +198,25 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-project-name">
                 Project name
               </label>
-              <input id="modal-project-name" name="name" className="input" />
+              <input id="modal-project-name" name="name" className="input form-control" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-client-name">
                 Client name
               </label>
-              <input id="modal-client-name" name="clientName" className="input" />
+              <input id="modal-client-name" name="clientName" className="input form-control" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-source">
                 Source
               </label>
-              <input id="modal-source" name="sourceChannel" className="input" placeholder="Fiverr, Upwork, referral" />
+              <input id="modal-source" name="sourceChannel" className="input form-control" placeholder="Fiverr, Upwork, referral" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-project-status">
                 Status
               </label>
-              <select id="modal-project-status" name="status" className="select" defaultValue="planning">
+              <select id="modal-project-status" name="status" className="select form-select" defaultValue="planning">
                 <option value="planning">Planning</option>
                 <option value="active">Active</option>
                 <option value="review">Review</option>
@@ -227,16 +227,16 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-project-due">
                 Due date
               </label>
-              <input id="modal-project-due" name="dueDate" type="date" className="input" />
+              <input id="modal-project-due" name="dueDate" type="date" className="input form-control" />
             </div>
             <div className="field field-full">
               <label className="label" htmlFor="modal-project-summary">
                 Summary
               </label>
-              <textarea id="modal-project-summary" name="summary" className="textarea" />
+              <textarea id="modal-project-summary" name="summary" className="textarea form-control" />
             </div>
             <div className="field field-full">
-              <button className="button button-primary" type="submit">
+              <button className="button button-primary btn btn-warning" type="submit">
                 Create project
               </button>
             </div>
@@ -255,7 +255,7 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-strategy-project">
                 Project
               </label>
-              <select id="modal-strategy-project" name="projectId" className="select">
+              <select id="modal-strategy-project" name="projectId" className="select form-select">
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -267,22 +267,22 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-strategy-title">
                 Strategy title
               </label>
-              <input id="modal-strategy-title" name="title" className="input" />
+              <input id="modal-strategy-title" name="title" className="input form-control" />
             </div>
             <div className="field field-full">
               <label className="label" htmlFor="modal-strategy-summary">
                 Strategy summary
               </label>
-              <textarea id="modal-strategy-summary" name="summary" className="textarea" />
+              <textarea id="modal-strategy-summary" name="summary" className="textarea form-control" />
             </div>
             <div className="field field-full">
               <label className="label" htmlFor="modal-strategy-objective">
                 Objective
               </label>
-              <textarea id="modal-strategy-objective" name="objective" className="textarea" />
+              <textarea id="modal-strategy-objective" name="objective" className="textarea form-control" />
             </div>
             <div className="field field-full">
-              <button className="button button-secondary" type="submit">
+              <button className="button button-secondary btn btn-primary" type="submit">
                 Save strategy
               </button>
             </div>
@@ -301,7 +301,7 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-project">
                 Project
               </label>
-              <select id="modal-task-project" name="projectId" className="select">
+              <select id="modal-task-project" name="projectId" className="select form-select">
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -313,7 +313,7 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-strategy">
                 Strategy
               </label>
-              <select id="modal-task-strategy" name="strategyId" className="select">
+              <select id="modal-task-strategy" name="strategyId" className="select form-select">
                 <option value="">No linked strategy</option>
                 {strategies.map((strategy) => (
                   <option key={strategy.id} value={strategy.id}>
@@ -326,13 +326,13 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-title">
                 Task title
               </label>
-              <input id="modal-task-title" name="title" className="input" />
+              <input id="modal-task-title" name="title" className="input form-control" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-task-assignee">
                 Assign to
               </label>
-              <select id="modal-task-assignee" name="assigneeId" className="select">
+              <select id="modal-task-assignee" name="assigneeId" className="select form-select">
                 {employeeOptions.map((employee) => (
                   <option key={employee.id} value={employee.id}>
                     {employee.fullName}
@@ -344,7 +344,7 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-priority">
                 Priority
               </label>
-              <select id="modal-task-priority" name="priority" className="select" defaultValue="medium">
+              <select id="modal-task-priority" name="priority" className="select form-select" defaultValue="medium">
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -355,7 +355,7 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-status">
                 Initial status
               </label>
-              <select id="modal-task-status" name="status" className="select" defaultValue="todo">
+              <select id="modal-task-status" name="status" className="select form-select" defaultValue="todo">
                 <option value="todo">To do</option>
                 <option value="in_progress">In progress</option>
                 <option value="blocked">Blocked</option>
@@ -367,22 +367,22 @@ export function AdminControlCenter({
               <label className="label" htmlFor="modal-task-hours">
                 Estimated hours
               </label>
-              <input id="modal-task-hours" name="estimatedHours" type="number" step="0.5" min="0" className="input" defaultValue="1" />
+              <input id="modal-task-hours" name="estimatedHours" type="number" step="0.5" min="0" className="input form-control" defaultValue="1" />
             </div>
             <div className="field">
               <label className="label" htmlFor="modal-task-due">
                 Due date
               </label>
-              <input id="modal-task-due" name="dueDate" type="date" className="input" />
+              <input id="modal-task-due" name="dueDate" type="date" className="input form-control" />
             </div>
             <div className="field field-full">
               <label className="label" htmlFor="modal-task-description">
                 Work details
               </label>
-              <textarea id="modal-task-description" name="description" className="textarea" />
+              <textarea id="modal-task-description" name="description" className="textarea form-control" />
             </div>
             <div className="field field-full">
-              <button className="button button-primary" type="submit">
+              <button className="button button-primary btn btn-warning" type="submit">
                 Assign task
               </button>
             </div>

@@ -77,7 +77,7 @@ export function EmployeeReportCenter({
               <label className="label" htmlFor="employee-projectId">
                 Project
               </label>
-              <select id="employee-projectId" name="projectId" className="select">
+              <select id="employee-projectId" name="projectId" className="select form-select">
                 {projectOptions.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -93,7 +93,7 @@ export function EmployeeReportCenter({
                 id="employee-reportDate"
                 name="reportDate"
                 type="date"
-                className="input"
+                className="input form-control"
                 defaultValue={new Date().toISOString().slice(0, 10)}
               />
             </div>
@@ -107,7 +107,7 @@ export function EmployeeReportCenter({
                 type="number"
                 min="0"
                 step="0.5"
-                className="input"
+                className="input form-control"
                 defaultValue="1"
               />
             </div>
@@ -115,16 +115,16 @@ export function EmployeeReportCenter({
               <label className="label" htmlFor="employee-summary">
                 What did you complete?
               </label>
-              <textarea id="employee-summary" name="summary" className="textarea" />
+              <textarea id="employee-summary" name="summary" className="textarea form-control" />
             </div>
             <div className="field field-full">
               <label className="label" htmlFor="employee-nextSteps">
                 Next steps
               </label>
-              <textarea id="employee-nextSteps" name="nextSteps" className="textarea" />
+              <textarea id="employee-nextSteps" name="nextSteps" className="textarea form-control" />
             </div>
             <div className="field field-full">
-              <button className="button button-secondary" type="submit">
+              <button className="button button-secondary btn btn-primary" type="submit">
                 Save daily report
               </button>
             </div>
