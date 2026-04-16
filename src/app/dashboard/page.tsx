@@ -10,6 +10,10 @@ function MessageNotice({ message }: { message?: string }) {
   const map: Record<string, string> = {
     "user-created": "New user saved successfully.",
     "project-created": "Project created successfully.",
+    "project-updated": "Project updated successfully.",
+    "project-archived": "Project archived successfully.",
+    "project-restored": "Project restored successfully.",
+    "project-deleted": "Project deleted permanently.",
     "strategy-created": "Strategy saved successfully.",
     "task-created": "Task assigned successfully.",
     "task-updated": "Task progress updated successfully.",

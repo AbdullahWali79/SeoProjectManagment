@@ -35,8 +35,11 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL CHECK (status IN ('planning', 'active', 'review', 'done')),
   due_date TEXT,
   summary TEXT NOT NULL,
+  is_archived INTEGER NOT NULL DEFAULT 0,
+  archived_at TEXT,
   created_by TEXT NOT NULL REFERENCES users(id),
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS strategies (
@@ -95,6 +98,22 @@ CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_task_updates_task_id ON task_updates(task_id);
 CREATE INDEX IF NOT EXISTS idx_daily_reports_project_id ON daily_reports(project_id);
 `);
+
+const projectColumnsResult = db.exec("PRAGMA table_info(projects);");
+const projectColumns = new Set((projectColumnsResult[0]?.values ?? []).map((column) => String(column[1])));
+
+if (!projectColumns.has("is_archived")) {
+  db.exec("ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;");
+}
+
+if (!projectColumns.has("archived_at")) {
+  db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT;");
+}
+
+if (!projectColumns.has("updated_at")) {
+  db.exec("ALTER TABLE projects ADD COLUMN updated_at TEXT;");
+  db.exec("UPDATE projects SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL;");
+}
 
 function getRow(sql, params = []) {
   const statement = db.prepare(sql);

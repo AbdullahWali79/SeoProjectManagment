@@ -1,19 +1,89 @@
-import { AdminControlCenter } from "@/components/dashboard/admin-control-center";
-import { type AdminDailyReportRow, type DashboardTaskRow } from "@/lib/data";
+"use client";
+
+import { useDeferredValue, useMemo, useState } from "react";
+
+import {
+  createProjectAction,
+  archiveProjectAction,
+  deleteProjectAction,
+  restoreProjectAction,
+  updateProjectAction,
+} from "@/app/actions";
+import { AdminWorkspaceShell } from "@/components/dashboard/admin-workspace-shell";
+import {
+  type AdminDailyReportRow,
+  type AdminEmployeeWorkloadRow,
+  type AdminProjectRow,
+  type AdminReportMonitorRow,
+  type AdminTaskAlertRow,
+  type ArchivedProjectRow,
+  type DashboardTaskRow,
+} from "@/lib/data";
 import type { AppRole } from "@/lib/auth";
 
 function statusLabel(value: string) {
   return value.replaceAll("_", " ");
 }
 
+function isPastDate(value: string | null) {
+  return Boolean(value && value < new Date().toISOString().slice(0, 10));
+}
+
+function progressForProject(project: AdminProjectRow) {
+  const totalTasks = Number(project.totalTasks || 0);
+  const completedTasks = Number(project.completedTasks || 0);
+  const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+  return {
+    totalTasks,
+    completedTasks,
+    progress,
+  };
+}
+
+function normalizeSearchValue(value: string | null | undefined) {
+  return value?.toLowerCase() ?? "";
+}
+
+function matchesProject(project: AdminProjectRow, query: string) {
+  if (!query) {
+    return true;
+  }
+
+  return [
+    project.name,
+    project.clientName,
+    project.sourceChannel,
+    project.summary,
+    project.status,
+    project.displayStatus,
+    project.dueDate,
+  ].some((value) => normalizeSearchValue(value).includes(query));
+}
+
+function matchesArchivedProject(project: ArchivedProjectRow, query: string) {
+  if (!query) {
+    return true;
+  }
+
+  return [project.name, project.clientName, project.archivedAt].some((value) =>
+    normalizeSearchValue(value).includes(query),
+  );
+}
+
 export function AdminView({
   stats,
   projects,
+  archivedProjects,
   employees,
   strategies,
   tasks,
   updates,
   reports,
+  workload,
+  overdueTasks,
+  blockedTasks,
+  reportMonitor,
   activeReportDate,
   availableReportDates,
   reportSummary,
@@ -23,18 +93,13 @@ export function AdminView({
     openTasks: number;
     activeEmployees: number;
     todayHours: number;
+    blockedTasks: number;
+    overdueTasks: number;
+    missingReports: number;
+    archivedProjects: number;
   };
-  projects: Array<{
-    id: string;
-    name: string;
-    clientName: string;
-    sourceChannel: string;
-    status: string;
-    dueDate: string | null;
-    summary: string;
-    totalTasks: number;
-    completedTasks: number | null;
-  }>;
+  projects: AdminProjectRow[];
+  archivedProjects: ArchivedProjectRow[];
   employees: Array<{ id: string; fullName: string; email: string; role: AppRole }>;
   strategies: Array<{ id: string; title: string; projectId: string; projectName: string }>;
   tasks: DashboardTaskRow[];
@@ -50,6 +115,10 @@ export function AdminView({
     projectName: string;
   }>;
   reports: AdminDailyReportRow[];
+  workload: AdminEmployeeWorkloadRow[];
+  overdueTasks: AdminTaskAlertRow[];
+  blockedTasks: AdminTaskAlertRow[];
+  reportMonitor: AdminReportMonitorRow[];
   activeReportDate: string;
   availableReportDates: string[];
   reportSummary: {
@@ -59,28 +128,65 @@ export function AdminView({
     projectCount: number;
   };
 }) {
+  const [projectSearch, setProjectSearch] = useState("");
+  const deferredProjectSearch = useDeferredValue(projectSearch);
+  const normalizedProjectSearch = deferredProjectSearch.trim().toLowerCase();
+
   const reportDateQuery = encodeURIComponent(activeReportDate);
+  const focusTasks = tasks.slice(0, 4);
+  const spotlightStrategies = strategies.slice(0, 4);
+  const filteredProjects = useMemo(
+    () => projects.filter((project) => matchesProject(project, normalizedProjectSearch)),
+    [projects, normalizedProjectSearch],
+  );
+  const filteredArchivedProjects = useMemo(
+    () => archivedProjects.filter((project) => matchesArchivedProject(project, normalizedProjectSearch)),
+    [archivedProjects, normalizedProjectSearch],
+  );
+  const projectStatusSummary = useMemo(
+    () =>
+      filteredProjects.reduce(
+        (summary, project) => {
+          summary[project.displayStatus] = (summary[project.displayStatus] ?? 0) + 1;
+          return summary;
+        },
+        {} as Record<string, number>,
+      ),
+    [filteredProjects],
+  );
+  const hasProjectSearch = projectSearch.trim().length > 0;
 
   return (
-    <>
-      <section className="panel admin-hero mb-4">
+    <AdminWorkspaceShell
+      stats={stats}
+      employees={employees}
+      projects={projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        clientName: project.clientName,
+        status: project.status,
+      }))}
+      strategies={strategies}
+    >
+      <section id="admin-overview" className="panel admin-hero admin-overview-hero">
         <div className="row g-4 align-items-stretch">
           <div className="col-xl-7">
             <div className="admin-hero-copy">
               <p className="eyebrow">Operations cockpit</p>
-              <h2>Keep client delivery, assignments, and reporting inside one colorful control room.</h2>
+              <h2>Track project health, employee workload, and daily reporting from one tighter admin control room.</h2>
               <p className="subtle">
-                Jump between project portfolio, execution queue, daily reports, and team updates without losing context.
+                Focus first on missing reports, overdue items, blocked execution, and project lifecycle changes without
+                jumping between views.
               </p>
               <div className="admin-hero-actions d-flex flex-wrap gap-2">
-                <a className="button button-secondary compact-button btn btn-primary" href="#admin-reports">
-                  Open daily reports
+                <a className="button button-secondary compact-button btn btn-primary" href="#admin-projects">
+                  Open project tracker
+                </a>
+                <a className="button button-ghost compact-button btn btn-light" href="#admin-reports">
+                  Review report monitor
                 </a>
                 <a className="button button-ghost compact-button btn btn-light" href="#admin-queue">
-                  View execution queue
-                </a>
-                <a className="button button-ghost compact-button btn btn-light" href="#admin-projects">
-                  Review projects
+                  Check alerts
                 </a>
               </div>
             </div>
@@ -89,30 +195,30 @@ export function AdminView({
             <div className="row g-3 h-100">
               <div className="col-sm-6">
                 <div className="admin-mini-card admin-mini-card-primary h-100">
-                  <span className="eyebrow">Report coverage</span>
-                  <strong>{reportSummary.reportsCount}</strong>
-                  <p>Daily reports already saved for the selected date.</p>
+                  <span className="eyebrow">Projects live</span>
+                  <strong>{stats.totalProjects}</strong>
+                  <p>Active client workspaces currently under tracking.</p>
                 </div>
               </div>
               <div className="col-sm-6">
                 <div className="admin-mini-card admin-mini-card-warm h-100">
-                  <span className="eyebrow">Team active</span>
-                  <strong>{stats.activeEmployees}</strong>
-                  <p>Employees currently visible in the delivery workflow.</p>
+                  <span className="eyebrow">Missing reports</span>
+                  <strong>{stats.missingReports}</strong>
+                  <p>Employees who have not submitted for {activeReportDate}.</p>
                 </div>
               </div>
               <div className="col-sm-6">
                 <div className="admin-mini-card h-100">
-                  <span className="eyebrow">Projects tracked</span>
-                  <strong>{stats.totalProjects}</strong>
-                  <p>Client workspaces now moving through your dashboard.</p>
+                  <span className="eyebrow">Blocked tasks</span>
+                  <strong>{stats.blockedTasks}</strong>
+                  <p>Execution items currently waiting on blocker resolution.</p>
                 </div>
               </div>
               <div className="col-sm-6">
                 <div className="admin-mini-card h-100">
-                  <span className="eyebrow">Hours logged</span>
-                  <strong>{reportSummary.totalHours}</strong>
-                  <p>Reported hours ready to reuse in the next client call.</p>
+                  <span className="eyebrow">Overdue alerts</span>
+                  <strong>{stats.overdueTasks}</strong>
+                  <p>Tasks already past due and needing immediate admin attention.</p>
                 </div>
               </div>
             </div>
@@ -124,54 +230,416 @@ export function AdminView({
         <div className="panel stat-card stat-card-projects">
           <p className="eyebrow">Projects</p>
           <p className="metric">{stats.totalProjects}</p>
-          <p className="subtle">Client workspaces currently tracked.</p>
+          <p className="subtle">Tracked client workspaces excluding archived items.</p>
         </div>
         <div className="panel stat-card stat-card-tasks">
           <p className="eyebrow">Open tasks</p>
           <p className="metric">{stats.openTasks}</p>
-          <p className="subtle">Tasks still moving across the team.</p>
+          <p className="subtle">All non-complete tasks currently moving across the team.</p>
         </div>
         <div className="panel stat-card stat-card-team">
-          <p className="eyebrow">Employees</p>
-          <p className="metric">{stats.activeEmployees}</p>
-          <p className="subtle">Active executors under your account.</p>
+          <p className="eyebrow">Reports missing</p>
+          <p className="metric">{stats.missingReports}</p>
+          <p className="subtle">Employees still missing their report for {activeReportDate}.</p>
         </div>
         <div className="panel stat-card stat-card-hours">
           <p className="eyebrow">Hours today</p>
           <p className="metric">{stats.todayHours}</p>
-          <p className="subtle">Reported work already ready for client reporting.</p>
+          <p className="subtle">Submitted hours visible from active projects right now.</p>
         </div>
       </section>
 
-      <section className="dashboard-grid">
-        <div className="primary-column stack">
-          <section id="admin-projects" className="panel section table-section">
-            <div className="section-head">
-              <div className="section-copy">
-                <p className="eyebrow">Portfolio overview</p>
-                <h3>Project summary for client meetings</h3>
-                <p className="subtle">
-                  Review each client, its source, current status, and completion progress before the next call.
-                </p>
+      <section className="admin-insight-grid">
+        <section className="panel section admin-insight-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Employee workload board</p>
+              <h3>Who is carrying the queue right now</h3>
+              <p className="subtle">Check task load, overdue pressure, and report activity before assigning more work.</p>
+            </div>
+          </div>
+          <div className="admin-brief-list">
+            {workload.length ? (
+              workload.map((member) => (
+                <article key={member.id} className="admin-brief-item">
+                  <div>
+                    <strong>{member.fullName}</strong>
+                    <p className="subtle mini">{member.email}</p>
+                    <div className="summary-inline admin-inline-pills">
+                      <span className="pill pill-status-active">{member.activeTasks} active</span>
+                      <span className="pill pill-status-blocked">{member.blockedTasks} blocked</span>
+                      <span className="pill pill-status-overdue">{member.overdueTasks} overdue</span>
+                      <span className="pill pill-status-review">{member.activeProjects} projects</span>
+                    </div>
+                  </div>
+                  <div className="admin-brief-meta">
+                    <span className={`pill ${member.reportCount ? "pill-status-done" : "pill-status-missing"}`}>
+                      {member.reportCount ? "Reported" : "Missing report"}
+                    </span>
+                    <span className="subtle mini">
+                      {member.queuedHours}h queued | {member.reportHours}h reported
+                    </span>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="subtle">No employees are active yet.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="panel section admin-insight-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Daily report monitor</p>
+              <h3>Submitted vs missing for {activeReportDate}</h3>
+              <p className="subtle">The fastest way to see who reported, how many hours came in, and which projects were touched.</p>
+            </div>
+          </div>
+          <div className="admin-brief-list">
+            {reportMonitor.length ? (
+              reportMonitor.map((member) => (
+                <article key={member.id} className="admin-brief-item">
+                  <div>
+                    <strong>{member.fullName}</strong>
+                    <p className="subtle mini">{member.projectNames || "No projects reported yet"}</p>
+                  </div>
+                  <div className="admin-brief-meta">
+                    <span className={`pill ${member.status === "submitted" ? "pill-status-done" : "pill-status-missing"}`}>
+                      {member.status === "submitted" ? "Submitted" : "Missing"}
+                    </span>
+                    <span className="subtle mini">
+                      {member.reportCount} report{member.reportCount === 1 ? "" : "s"} | {member.totalHours}h
+                    </span>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="subtle">No employee reporting data is available yet.</p>
+            )}
+          </div>
+        </section>
+      </section>
+
+      <section className="admin-insight-grid">
+        <section className="panel section admin-insight-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Overdue alerts</p>
+              <h3>Tasks already past their due date</h3>
+              <p className="subtle">Use this list to jump straight into the items that need admin intervention today.</p>
+            </div>
+          </div>
+          <div className="admin-brief-list">
+            {overdueTasks.length ? (
+              overdueTasks.map((task) => (
+                <article key={task.id} className="admin-brief-item">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p className="subtle mini">
+                      {task.assigneeName} | {task.projectName}
+                    </p>
+                    <p className="subtle mini">{task.resultNote || "Awaiting update"}</p>
+                  </div>
+                  <div className="admin-brief-meta">
+                    <span className="pill pill-status-overdue">{task.priority} priority</span>
+                    <span className="subtle mini">{task.dueDate || "No due date"}</span>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="subtle">No overdue tasks right now.</p>
+            )}
+          </div>
+        </section>
+
+        <section className="panel section admin-insight-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Blocked tasks panel</p>
+              <h3>Execution items waiting on unblock</h3>
+              <p className="subtle">Latest blocker notes stay visible here so you can clear dependencies without opening each task.</p>
+            </div>
+          </div>
+          <div className="admin-brief-list">
+            {blockedTasks.length ? (
+              blockedTasks.map((task) => (
+                <article key={task.id} className="admin-brief-item">
+                  <div>
+                    <strong>{task.title}</strong>
+                    <p className="subtle mini">
+                      {task.assigneeName} | {task.projectName}
+                    </p>
+                    <p className="subtle mini">{task.blockers}</p>
+                  </div>
+                  <div className="admin-brief-meta">
+                    <span className="pill pill-status-blocked">Blocked</span>
+                    <span className="subtle mini">{task.dueDate || "No due date"}</span>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="subtle">No blocked tasks at the moment.</p>
+            )}
+          </div>
+        </section>
+      </section>
+
+      <section className="stack">
+        <section id="admin-reports" className="panel section table-section">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Team reporting</p>
+              <h3>Daily report pack for {activeReportDate}</h3>
+              <p className="subtle">
+                Export this day&apos;s report to Excel or open a print-friendly layout for PDF and printing.
+              </p>
+            </div>
+            <div className="report-toolbar">
+              <form className="toolbar-inline" method="get">
+                <label className="label" htmlFor="reportDate">
+                  Report date
+                </label>
+                <select id="reportDate" name="reportDate" className="select compact-select form-select" defaultValue={activeReportDate}>
+                  {availableReportDates.map((date) => (
+                    <option key={date} value={date}>
+                      {date}
+                    </option>
+                  ))}
+                </select>
+                <button className="button button-ghost compact-button btn btn-light" type="submit">
+                  Apply
+                </button>
+              </form>
+              <div className="toolbar-actions">
+                <a className="button button-secondary compact-button btn btn-primary" href={`/dashboard/reports/export?date=${reportDateQuery}`}>
+                  Export Excel
+                </a>
+                <a
+                  className="button button-ghost compact-button btn btn-light"
+                  href={`/dashboard/reports/print?date=${reportDateQuery}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Print / Save PDF
+                </a>
               </div>
             </div>
-            <div className="table-wrap">
-              <table className="table table-hover align-middle mb-0">
-                <thead>
+          </div>
+          <div className="summary-inline">
+            <span className="pill pill-status-active">{reportSummary.totalHours}h logged</span>
+            <span className="pill pill-status-planning">{reportSummary.employeeCount} team members reported</span>
+            <span className="pill pill-status-review">{reportSummary.projectCount} projects touched</span>
+            <span className="pill pill-status-done">{reportSummary.reportsCount} daily reports</span>
+            <span className="pill pill-status-missing">{stats.missingReports} missing</span>
+          </div>
+          <div className="table-wrap">
+            <table className="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Employee</th>
+                  <th>Project</th>
+                  <th>Hours</th>
+                  <th>Summary</th>
+                  <th>Next steps</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.length ? (
+                  reports.map((report) => (
+                    <tr key={report.id}>
+                      <td>{report.reportDate}</td>
+                      <td>{report.userName}</td>
+                      <td>{report.projectName}</td>
+                      <td>{report.totalHours}</td>
+                      <td>{report.summary}</td>
+                      <td>{report.nextSteps}</td>
+                    </tr>
+                  ))
+                ) : (
                   <tr>
-                    <th>Project</th>
-                    <th>Client</th>
-                    <th>Source</th>
-                    <th>Status</th>
-                    <th>Progress</th>
-                    <th>Due</th>
+                    <td colSpan={6}>
+                      <div className="report-empty">
+                        No daily reports are available for this date yet.
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {projects.map((project) => {
-                    const totalTasks = Number(project.totalTasks || 0);
-                    const completedTasks = Number(project.completedTasks || 0);
-                    const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="admin-queue" className="panel section table-section">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Execution queue</p>
+              <h3>Task tracking board</h3>
+              <p className="subtle">
+                Monitor the current owner, effort spent, result note, and deadline on every active deliverable.
+              </p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Task</th>
+                  <th>Project</th>
+                  <th>Assignee</th>
+                  <th>Status</th>
+                  <th>Effort</th>
+                  <th>Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => (
+                  <tr key={task.id}>
+                    <td>
+                      <strong>{task.title}</strong>
+                      <div className="subtle mini">{task.strategyTitle || "No linked strategy"}</div>
+                    </td>
+                    <td>{task.projectName}</td>
+                    <td>{task.assigneeName}</td>
+                    <td>
+                      <span className={`pill ${isPastDate(task.dueDate) && task.status !== "done" ? "pill-status-overdue" : `pill-status-${task.status}`}`}>
+                        {isPastDate(task.dueDate) && task.status !== "done" ? "overdue" : statusLabel(task.status)}
+                      </span>
+                    </td>
+                    <td>
+                      {task.actualHours}h / {task.estimatedHours}h
+                      <div className={`subtle mini ${isPastDate(task.dueDate) && task.status !== "done" ? "admin-alert-note" : ""}`}>
+                        {task.dueDate || "No due date"}
+                      </div>
+                    </td>
+                    <td>{task.resultNote || "Awaiting update"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="admin-projects" className="panel section table-section">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Project tracker</p>
+              <h3>Create, edit, archive, and track every project from one board</h3>
+              <p className="subtle">
+                Add from the top action, edit from each row, archive instantly, and delete permanently from the archived list.
+              </p>
+            </div>
+            <div className="admin-project-toolbar">
+              <div className="field admin-project-search">
+                <label className="label" htmlFor="project-search">
+                  Search projects
+                </label>
+                <div className="toolbar-inline">
+                  <input
+                    id="project-search"
+                    name="projectSearch"
+                    className="input form-control admin-project-search-input"
+                    value={projectSearch}
+                    onChange={(event) => setProjectSearch(event.target.value)}
+                    placeholder="Project, client, source, summary, or status"
+                  />
+                  {hasProjectSearch ? (
+                    <button
+                      type="button"
+                      className="button button-ghost compact-button btn btn-light"
+                      onClick={() => setProjectSearch("")}
+                    >
+                      Clear
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <details className="admin-add-project">
+                <summary className="button button-secondary compact-button btn btn-primary">Add project</summary>
+                <div className="admin-project-manage-panel">
+                  <form action={createProjectAction} className="form-grid admin-inline-form">
+                    <div className="field">
+                      <label className="label" htmlFor="tracker-project-name">
+                        Project name
+                      </label>
+                      <input id="tracker-project-name" name="name" className="input form-control" />
+                    </div>
+                    <div className="field">
+                      <label className="label" htmlFor="tracker-client-name">
+                        Client
+                      </label>
+                      <input id="tracker-client-name" name="clientName" className="input form-control" />
+                    </div>
+                    <div className="field">
+                      <label className="label" htmlFor="tracker-source">
+                        Source
+                      </label>
+                      <input id="tracker-source" name="sourceChannel" className="input form-control" placeholder="Fiverr, Upwork, referral" />
+                    </div>
+                    <div className="field">
+                      <label className="label" htmlFor="tracker-status">
+                        Status
+                      </label>
+                      <select id="tracker-status" name="status" className="select form-select" defaultValue="planning">
+                        <option value="planning">Planning</option>
+                        <option value="active">Active</option>
+                        <option value="review">Review</option>
+                        <option value="done">Done</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label className="label" htmlFor="tracker-due-date">
+                        Due date
+                      </label>
+                      <input id="tracker-due-date" name="dueDate" type="date" className="input form-control" />
+                    </div>
+                    <div className="field field-full">
+                      <label className="label" htmlFor="tracker-summary">
+                        Summary
+                      </label>
+                      <textarea id="tracker-summary" name="summary" className="textarea form-control" />
+                    </div>
+                    <div className="field field-full admin-inline-actions">
+                      <button className="button button-secondary compact-button btn btn-primary" type="submit">
+                        Create project
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </details>
+            </div>
+          </div>
+          {hasProjectSearch ? (
+            <p className="subtle mini admin-project-search-note">
+              Showing {filteredProjects.length} of {projects.length} live project{projects.length === 1 ? "" : "s"} and{" "}
+              {filteredArchivedProjects.length} of {archivedProjects.length} archived project
+              {archivedProjects.length === 1 ? "" : "s"} matching "{projectSearch.trim()}".
+            </p>
+          ) : null}
+          <div className="summary-inline">
+            <span className="pill pill-status-active">{projectStatusSummary.active ?? 0} active</span>
+            <span className="pill pill-status-planning">{projectStatusSummary.planning ?? 0} planning</span>
+            <span className="pill pill-status-review">{projectStatusSummary.review ?? 0} review</span>
+            <span className="pill pill-status-done">{projectStatusSummary.done ?? 0} done</span>
+            <span className="pill pill-status-overdue">{projectStatusSummary.overdue ?? 0} overdue</span>
+          </div>
+          <div className="table-wrap">
+            <table className="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Client</th>
+                  <th>Status tracker</th>
+                  <th>Progress</th>
+                  <th>Due</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProjects.length ? (
+                  filteredProjects.map((project) => {
+                    const { totalTasks, completedTasks, progress } = progressForProject(project);
 
                     return (
                       <tr key={project.id}>
@@ -179,215 +647,299 @@ export function AdminView({
                           <strong>{project.name}</strong>
                           <div className="subtle mini">{project.summary}</div>
                         </td>
-                        <td>{project.clientName}</td>
-                        <td>{project.sourceChannel}</td>
                         <td>
-                          <span className={`pill pill-status-${project.status}`}>{statusLabel(project.status)}</span>
+                          {project.clientName}
+                          <div className="subtle mini">{project.sourceChannel}</div>
                         </td>
-                        <td>{progress}%</td>
-                        <td>{project.dueDate || "No deadline"}</td>
+                        <td>
+                          <span className={`pill pill-status-${project.displayStatus}`}>{statusLabel(project.displayStatus)}</span>
+                          <div className="subtle mini">
+                            {Number(project.activeTasks || 0)} active | {Number(project.blockedTasks || 0)} blocked
+                          </div>
+                        </td>
+                        <td>
+                          <div className="admin-progress">
+                            <div className="admin-progress-track">
+                              <span className="admin-progress-bar" style={{ width: `${progress}%` }} />
+                            </div>
+                            <div className="subtle mini">
+                              {progress}% complete | {completedTasks}/{totalTasks} tasks done
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={isPastDate(project.dueDate) && project.displayStatus === "overdue" ? "admin-alert-note" : undefined}>
+                            {project.dueDate || "No deadline"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="admin-row-actions">
+                            <details className="admin-project-manage">
+                              <summary className="button button-ghost compact-button btn btn-light">Edit</summary>
+                              <div className="admin-project-manage-panel">
+                                <form action={updateProjectAction} className="form-grid admin-inline-form">
+                                  <input type="hidden" name="projectId" value={project.id} />
+                                  <div className="field">
+                                    <label className="label" htmlFor={`project-name-${project.id}`}>
+                                      Project name
+                                    </label>
+                                    <input
+                                      id={`project-name-${project.id}`}
+                                      name="name"
+                                      className="input form-control"
+                                      defaultValue={project.name}
+                                    />
+                                  </div>
+                                  <div className="field">
+                                    <label className="label" htmlFor={`project-client-${project.id}`}>
+                                      Client
+                                    </label>
+                                    <input
+                                      id={`project-client-${project.id}`}
+                                      name="clientName"
+                                      className="input form-control"
+                                      defaultValue={project.clientName}
+                                    />
+                                  </div>
+                                  <div className="field">
+                                    <label className="label" htmlFor={`project-source-${project.id}`}>
+                                      Source
+                                    </label>
+                                    <input
+                                      id={`project-source-${project.id}`}
+                                      name="sourceChannel"
+                                      className="input form-control"
+                                      defaultValue={project.sourceChannel}
+                                    />
+                                  </div>
+                                  <div className="field">
+                                    <label className="label" htmlFor={`project-status-${project.id}`}>
+                                      Status
+                                    </label>
+                                    <select
+                                      id={`project-status-${project.id}`}
+                                      name="status"
+                                      className="select form-select"
+                                      defaultValue={project.status}
+                                    >
+                                      <option value="planning">Planning</option>
+                                      <option value="active">Active</option>
+                                      <option value="review">Review</option>
+                                      <option value="done">Done</option>
+                                    </select>
+                                  </div>
+                                  <div className="field">
+                                    <label className="label" htmlFor={`project-due-${project.id}`}>
+                                      Due date
+                                    </label>
+                                    <input
+                                      id={`project-due-${project.id}`}
+                                      name="dueDate"
+                                      type="date"
+                                      className="input form-control"
+                                      defaultValue={project.dueDate || ""}
+                                    />
+                                  </div>
+                                  <div className="field field-full">
+                                    <label className="label" htmlFor={`project-summary-${project.id}`}>
+                                      Summary
+                                    </label>
+                                    <textarea
+                                      id={`project-summary-${project.id}`}
+                                      name="summary"
+                                      className="textarea form-control"
+                                      defaultValue={project.summary}
+                                    />
+                                  </div>
+                                  <div className="field field-full admin-inline-actions">
+                                    <button className="button button-secondary compact-button btn btn-primary" type="submit">
+                                      Save changes
+                                    </button>
+                                  </div>
+                                </form>
+                              </div>
+                            </details>
+                            <form action={archiveProjectAction} className="admin-action-form">
+                              <input type="hidden" name="projectId" value={project.id} />
+                              <button className="button button-ghost compact-button btn btn-light admin-archive-button" type="submit">
+                                Archive
+                              </button>
+                            </form>
+                          </div>
+                        </td>
                       </tr>
                     );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="admin-queue" className="panel section table-section">
-            <div className="section-head">
-              <div className="section-copy">
-                <p className="eyebrow">Execution queue</p>
-                <h3>Task tracking board</h3>
-                <p className="subtle">
-                  Monitor the current owner, effort spent, result note, and deadline on every active deliverable.
-                </p>
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table className="table table-hover align-middle mb-0">
-                <thead>
+                  })
+                ) : (
                   <tr>
-                    <th>Task</th>
-                    <th>Project</th>
-                    <th>Assignee</th>
-                    <th>Status</th>
-                    <th>Effort</th>
-                    <th>Result</th>
+                    <td colSpan={6}>
+                      <div className="report-empty">
+                        {hasProjectSearch ? "No projects match this search." : "No projects are available yet."}
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {tasks.map((task) => (
-                    <tr key={task.id}>
-                      <td>
-                        <strong>{task.title}</strong>
-                        <div className="subtle mini">{task.strategyTitle || "No linked strategy"}</div>
-                      </td>
-                      <td>{task.projectName}</td>
-                      <td>{task.assigneeName}</td>
-                      <td>
-                        <span className={`pill pill-status-${task.status}`}>{statusLabel(task.status)}</span>
-                      </td>
-                      <td>
-                        {task.actualHours}h / {task.estimatedHours}h
-                        <div className="subtle mini">{task.dueDate || "No due date"}</div>
-                      </td>
-                      <td>{task.resultNote || "Awaiting update"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+                )}
+              </tbody>
+            </table>
+          </div>
 
-          <section id="admin-reports" className="panel section table-section">
-            <div className="section-head">
-              <div className="section-copy">
-                <p className="eyebrow">Team reporting</p>
-                <h3>Daily report pack for {activeReportDate}</h3>
-                <p className="subtle">
-                  Export this day&apos;s report to Excel or open a print-friendly layout for PDF and printing.
-                </p>
-              </div>
-              <div className="report-toolbar">
-                <form className="toolbar-inline" method="get">
-                  <label className="label" htmlFor="reportDate">
-                    Report date
-                  </label>
-                  <select id="reportDate" name="reportDate" className="select compact-select form-select" defaultValue={activeReportDate}>
-                    {availableReportDates.map((date) => (
-                      <option key={date} value={date}>
-                        {date}
-                      </option>
-                    ))}
-                  </select>
-                  <button className="button button-ghost compact-button btn btn-light" type="submit">
-                    Apply
-                  </button>
-                </form>
-                <div className="toolbar-actions">
-                  <a className="button button-secondary compact-button btn btn-primary" href={`/dashboard/reports/export?date=${reportDateQuery}`}>
-                    Export Excel
-                  </a>
-                  <a
-                    className="button button-ghost compact-button btn btn-light"
-                    href={`/dashboard/reports/print?date=${reportDateQuery}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Print / Save PDF
-                  </a>
+          {archivedProjects.length ? (
+            <div className="admin-archived-block">
+              <div className="section-head">
+                <div className="section-copy">
+                  <p className="eyebrow">Archived projects</p>
+                  <h3>
+                    {hasProjectSearch
+                      ? `${filteredArchivedProjects.length} archived workspace${filteredArchivedProjects.length === 1 ? "" : "s"} match this search`
+                      : `${archivedProjects.length} archived workspace${archivedProjects.length === 1 ? "" : "s"}`}
+                  </h3>
+                  <p className="subtle">Restore archived workspaces whenever they need to come back into the live board.</p>
                 </div>
               </div>
-            </div>
-            <div className="summary-inline">
-              <span className="pill pill-status-active">{reportSummary.totalHours}h logged</span>
-              <span className="pill pill-status-planning">{reportSummary.employeeCount} team members</span>
-              <span className="pill pill-status-review">{reportSummary.projectCount} projects</span>
-              <span className="pill pill-status-done">{reportSummary.reportsCount} daily reports</span>
-            </div>
-            <div className="table-wrap">
-              <table className="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Employee</th>
-                    <th>Project</th>
-                    <th>Hours</th>
-                    <th>Summary</th>
-                    <th>Next steps</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {reports.length ? (
-                    reports.map((report) => (
-                      <tr key={report.id}>
-                        <td>{report.reportDate}</td>
-                        <td>{report.userName}</td>
-                        <td>{report.projectName}</td>
-                        <td>{report.totalHours}</td>
-                        <td>{report.summary}</td>
-                        <td>{report.nextSteps}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6}>
-                        <div className="report-empty">
-                          No daily reports are available for this date yet.
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section id="admin-activity" className="panel section table-section">
-            <div className="section-head">
-              <div className="section-copy">
-                <p className="eyebrow">Activity stream</p>
-                <h3>Recent team updates</h3>
-                <p className="subtle">Blockers and outcomes appear here as soon as team members update their tasks.</p>
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table className="table table-hover align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Task</th>
-                    <th>Status</th>
-                    <th>Hours</th>
-                    <th>Outcome</th>
-                    <th>Blockers</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {updates.map((update) => (
-                    <tr key={update.id}>
-                      <td>
-                        <strong>{update.userName}</strong>
-                        <div className="subtle mini">{update.projectName}</div>
-                      </td>
-                      <td>{update.taskTitle}</td>
-                      <td>
-                        <span className={`pill pill-status-${update.status}`}>{statusLabel(update.status)}</span>
-                      </td>
-                      <td>{update.timeSpentHours}</td>
-                      <td>{update.outcome}</td>
-                      <td>{update.blockers || "None"}</td>
-                    </tr>
+              {filteredArchivedProjects.length ? (
+                <div className="admin-people-grid admin-archived-grid">
+                  {filteredArchivedProjects.map((project) => (
+                    <article key={project.id} className="admin-person-tile admin-archived-item">
+                      <div>
+                        <strong>{project.name}</strong>
+                        <p className="subtle mini">
+                          {project.clientName} | {project.totalTasks} tasks
+                        </p>
+                        <p className="subtle mini">Archived {project.archivedAt || "recently"}</p>
+                      </div>
+                      <div className="admin-row-actions">
+                        <form action={restoreProjectAction} className="admin-action-form">
+                          <input type="hidden" name="projectId" value={project.id} />
+                          <button className="button button-ghost compact-button btn btn-light" type="submit">
+                            Restore
+                          </button>
+                        </form>
+                        <form action={deleteProjectAction} className="admin-action-form">
+                          <input type="hidden" name="projectId" value={project.id} />
+                          <button className="button button-ghost compact-button btn btn-light admin-delete-button" type="submit">
+                            Delete
+                          </button>
+                        </form>
+                      </div>
+                    </article>
                   ))}
-                </tbody>
-              </table>
+                </div>
+              ) : hasProjectSearch ? (
+                <div className="report-empty">No archived projects match this search.</div>
+              ) : null}
             </div>
-          </section>
-        </div>
+          ) : null}
+        </section>
 
-        <div className="side-rail">
-          <AdminControlCenter
-            employees={employees}
-            projects={projects.map((project) => ({
-              id: project.id,
-              name: project.name,
-              clientName: project.clientName,
-              status: project.status,
-            }))}
-            strategies={strategies}
-            openTasks={stats.openTasks}
-            todayHours={stats.todayHours}
-            focusTasks={tasks.slice(0, 4).map((task) => ({
-              id: task.id,
-              title: task.title,
-              assigneeName: task.assigneeName,
-              status: task.status,
-              dueDate: task.dueDate,
-            }))}
-          />
-        </div>
+        <section id="admin-activity" className="panel section table-section">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Activity stream</p>
+              <h3>Recent team updates</h3>
+              <p className="subtle">Blockers and outcomes appear here as soon as team members update their tasks.</p>
+            </div>
+          </div>
+          <div className="table-wrap">
+            <table className="table table-hover align-middle mb-0">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Task</th>
+                  <th>Status</th>
+                  <th>Hours</th>
+                  <th>Outcome</th>
+                  <th>Blockers</th>
+                </tr>
+              </thead>
+              <tbody>
+                {updates.map((update) => (
+                  <tr key={update.id}>
+                    <td>
+                      <strong>{update.userName}</strong>
+                      <div className="subtle mini">{update.projectName}</div>
+                    </td>
+                    <td>{update.taskTitle}</td>
+                    <td>
+                      <span className={`pill pill-status-${update.status}`}>{statusLabel(update.status)}</span>
+                    </td>
+                    <td>{update.timeSpentHours}</td>
+                    <td>{update.outcome}</td>
+                    <td>{update.blockers || "None"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="admin-team" className="panel section admin-team-section">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">People and planning</p>
+              <h3>Team snapshot</h3>
+              <p className="subtle">See the active roster, strategy library, and priority tasks in one clean workspace section.</p>
+            </div>
+          </div>
+          <div className="admin-team-grid">
+            <article className="admin-team-card">
+              <h4>Active users</h4>
+              <div className="admin-list-stack">
+                {employees.map((employee) => (
+                  <div key={employee.id} className="admin-list-row">
+                    <div>
+                      <strong>{employee.fullName}</strong>
+                      <p className="subtle mini">{employee.email}</p>
+                    </div>
+                    <span className="pill pill-status-planning">
+                      {employee.role === "admin" ? "Admin" : "Employee"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="admin-team-card">
+              <h4>Strategy library</h4>
+              <div className="admin-list-stack">
+                {spotlightStrategies.length ? (
+                  spotlightStrategies.map((strategy) => (
+                    <div key={strategy.id} className="admin-list-row">
+                      <div>
+                        <strong>{strategy.title}</strong>
+                        <p className="subtle mini">{strategy.projectName}</p>
+                      </div>
+                      <span className="pill pill-status-review">Strategy</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="subtle">No strategies saved yet.</p>
+                )}
+              </div>
+            </article>
+
+            <article className="admin-team-card">
+              <h4>Priority tasks</h4>
+              <div className="admin-list-stack">
+                {focusTasks.length ? (
+                  focusTasks.map((task) => (
+                    <div key={task.id} className="admin-list-row">
+                      <div>
+                        <strong>{task.title}</strong>
+                        <p className="subtle mini">
+                          {task.assigneeName} | {task.projectName}
+                        </p>
+                      </div>
+                      <span className={`pill pill-status-${task.status}`}>{statusLabel(task.status)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="subtle">No tasks assigned yet.</p>
+                )}
+              </div>
+            </article>
+          </div>
+        </section>
       </section>
-    </>
+    </AdminWorkspaceShell>
   );
 }

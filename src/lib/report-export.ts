@@ -85,6 +85,7 @@ export function buildDailyReportWorkbook({
     name: string;
     clientName: string;
     status: string;
+    displayStatus?: string;
     dueDate: string | null;
     totalTasks: number;
     completedTasks: number | null;
@@ -135,7 +136,7 @@ export function buildDailyReportWorkbook({
       return [
         { value: project.name, styleId: "Body" },
         { value: project.clientName, styleId: "Body" },
-        { value: project.status.replaceAll("_", " "), styleId: "Body" },
+        { value: (project.displayStatus ?? project.status).replaceAll("_", " "), styleId: "Body" },
         { value: `${progress}%`, styleId: "Body" },
         { value: project.dueDate || "No deadline", styleId: "Body" },
       ];

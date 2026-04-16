@@ -12,6 +12,9 @@ import {
   createStrategy,
   createTask,
   createUser,
+  deleteProjectPermanently,
+  setProjectArchivedState,
+  updateProject,
   updateTaskProgress,
 } from "@/lib/data";
 
@@ -34,6 +37,14 @@ const createProjectSchema = z.object({
   status: z.enum(["planning", "active", "review", "done"]),
   dueDate: z.string().optional().transform((value) => value || null),
   summary: z.string().min(10),
+});
+
+const updateProjectSchema = createProjectSchema.extend({
+  projectId: z.string().min(1),
+});
+
+const projectArchiveSchema = z.object({
+  projectId: z.string().min(1),
 });
 
 const createStrategySchema = z.object({
@@ -138,6 +149,70 @@ export async function createProjectAction(formData: FormData) {
 
   revalidatePath("/dashboard");
   redirect("/dashboard?message=project-created");
+}
+
+export async function updateProjectAction(formData: FormData) {
+  await requireAdmin();
+
+  const parsed = updateProjectSchema.parse({
+    projectId: formData.get("projectId"),
+    name: formData.get("name"),
+    clientName: formData.get("clientName"),
+    sourceChannel: formData.get("sourceChannel"),
+    status: formData.get("status"),
+    dueDate: formData.get("dueDate"),
+    summary: formData.get("summary"),
+  });
+
+  await updateProject(parsed);
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?message=project-updated#admin-projects");
+}
+
+export async function archiveProjectAction(formData: FormData) {
+  await requireAdmin();
+
+  const parsed = projectArchiveSchema.parse({
+    projectId: formData.get("projectId"),
+  });
+
+  await setProjectArchivedState({
+    projectId: parsed.projectId,
+    archived: true,
+  });
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?message=project-archived#admin-projects");
+}
+
+export async function restoreProjectAction(formData: FormData) {
+  await requireAdmin();
+
+  const parsed = projectArchiveSchema.parse({
+    projectId: formData.get("projectId"),
+  });
+
+  await setProjectArchivedState({
+    projectId: parsed.projectId,
+    archived: false,
+  });
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?message=project-restored#admin-projects");
+}
+
+export async function deleteProjectAction(formData: FormData) {
+  await requireAdmin();
+
+  const parsed = projectArchiveSchema.parse({
+    projectId: formData.get("projectId"),
+  });
+
+  await deleteProjectPermanently(parsed.projectId);
+
+  revalidatePath("/dashboard");
+  redirect("/dashboard?message=project-deleted#admin-projects");
 }
 
 export async function createStrategyAction(formData: FormData) {

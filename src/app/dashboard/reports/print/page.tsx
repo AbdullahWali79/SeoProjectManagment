@@ -113,7 +113,7 @@ export default async function PrintReportPage({
                     <tr key={project.id}>
                       <td>{project.name}</td>
                       <td>{project.clientName}</td>
-                      <td>{statusLabel(project.status)}</td>
+                      <td>{statusLabel(project.displayStatus ?? project.status)}</td>
                       <td>{progress}%</td>
                       <td>{project.dueDate || "No deadline"}</td>
                     </tr>
