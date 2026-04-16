@@ -15,19 +15,19 @@ export type SessionUser = {
 
 export async function loginWithPassword(email: string, password: string) {
   const db = await getDb();
-  const user = getOne<{
+  const user = await getOne<{
     id: string;
     full_name: string;
     email: string;
     role: AppRole;
     password_hash: string;
-    is_active: number;
+    is_active: boolean;
   }>(
     db,
     `
       SELECT id, full_name, email, role, password_hash, is_active
       FROM users
-      WHERE email = ?
+      WHERE email = $1
     `,
     [email],
   );
@@ -65,7 +65,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
   }
 
   const db = await getDb();
-  const user = getOne<{
+  const user = await getOne<{
     id: string;
     full_name: string;
     email: string;
@@ -75,7 +75,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     `
       SELECT id, full_name, email, role
       FROM users
-      WHERE id = ?
+      WHERE id = $1
     `,
     [session.userId],
   );

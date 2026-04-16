@@ -271,9 +271,9 @@ export async function updateTaskProgressAction(formData: FormData) {
   });
 
   const db = await getDb();
-  const task = getOne<{ assignee_id: string | null }>(
+  const task = await getOne<{ assignee_id: string | null }>(
     db,
-    "SELECT assignee_id FROM tasks WHERE id = ?",
+    "SELECT assignee_id FROM tasks WHERE id = $1",
     [parsed.taskId],
   );
 

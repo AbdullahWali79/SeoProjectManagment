@@ -1,6 +1,6 @@
 # SEO Project Management
 
-Local-first MVP for an SEO software house:
+Supabase-backed SEO project and task management app for an SEO software house:
 
 - Admin can create users
 - Admin can create client projects
@@ -14,9 +14,24 @@ Local-first MVP for an SEO software house:
 
 ```bash
 npm install
-npm run db:init
 npm run dev
 ```
+
+Required environment variables:
+
+```bash
+APP_SESSION_SECRET=your-random-secret
+DATABASE_URL=your-supabase-postgres-connection-string
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+Database setup:
+
+1. Open Supabase SQL Editor
+2. Paste and run [scripts/supabase-schema.sql](./scripts/supabase-schema.sql)
+3. Add the environment variables above locally and in Vercel
 
 ## Demo credentials
 
@@ -26,9 +41,9 @@ npm run dev
 ## Current stack
 
 - Next.js + React
-- Local SQLite database file via `sql.js`
-- Cookie session auth for local MVP
+- Supabase Postgres
+- Custom cookie session auth
 
 ## Important note
 
-This local SQLite setup is for development and validation only. For Vercel production deployment, the data layer should be moved to Supabase Postgres. The data model in this MVP was kept close to that migration path.
+For Vercel deployment, make sure `DATABASE_URL` points to your Supabase Postgres instance and redeploy after adding the environment variables.

@@ -25,8 +25,8 @@ export default async function LoginPage() {
           </p>
           <p style={{ fontSize: "1.1rem", lineHeight: 1.8, color: "rgba(255,255,255,0.82)" }}>
             The admin can capture client projects, define strategies, assign SEO tasks to interns or employees, and review
-            task status, effort hours, and daily progress in one clean dashboard before client meetings. This is a local
-            SQLite MVP designed to be moved to Supabase and Vercel later.
+            task status, effort hours, and daily progress in one clean dashboard before client meetings. The current
+            deployment path now targets Supabase Postgres with the same admin and employee workflow.
           </p>
           <div className="login-help">
             <div className="panel" style={{ padding: 16, background: "rgba(255,255,255,0.08)", borderColor: "rgba(255,255,255,0.1)" }}>
@@ -54,8 +54,8 @@ export default async function LoginPage() {
             Start with admin or employee view
           </h2>
           <p className="subtle">
-            Test the application locally first. Once the workflow is stable, the same data model can be migrated to
-            Supabase Postgres.
+            Sign in with the seeded admin or employee account once your Supabase database and environment variables are
+            connected.
           </p>
           <LoginForm />
         </div>

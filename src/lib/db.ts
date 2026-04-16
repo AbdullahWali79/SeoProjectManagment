@@ -1,86 +1,89 @@
-import fs from "node:fs";
-import path from "node:path";
-import initSqlJs, { type BindParams, type Database as SqlDatabase, type SqlJsStatic } from "sql.js";
+import { Pool, type PoolClient } from "pg";
 
-export type QueryParam = string | number | null;
+export type QueryParam = string | number | boolean | null;
+export type DbClient = Pool | PoolClient;
 
-let sqlPromise: Promise<SqlJsStatic> | null = null;
-let databasePromise: Promise<SqlDatabase> | null = null;
+let pool: Pool | null = null;
 
-function getDatabasePath() {
-  return path.join(process.cwd(), "data", "app.db");
+function getConnectionString() {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.SUPABASE_DB_URL ||
+    ""
+  );
 }
 
-async function getSql() {
-  if (!sqlPromise) {
-    sqlPromise = initSqlJs({
-      locateFile: (file) => path.join(process.cwd(), "node_modules", "sql.js", "dist", file),
-    });
-  }
-
-  return sqlPromise;
+function needsSsl(connectionString: string) {
+  return !connectionString.includes("localhost") && !connectionString.includes("127.0.0.1");
 }
 
 export async function getDb() {
-  if (databasePromise) {
-    return databasePromise;
+  if (pool) {
+    return pool;
   }
 
-  const databasePath = getDatabasePath();
-  if (!fs.existsSync(databasePath)) {
-    throw new Error("Database not found. Run `npm run db:init` first.");
+  const connectionString = getConnectionString();
+  if (!connectionString) {
+    throw new Error(
+      "Database connection is not configured. Add DATABASE_URL in your environment variables before using Supabase/Postgres.",
+    );
   }
 
-  databasePromise = getSql().then((SQL) => {
-    const file = fs.readFileSync(databasePath);
-    return new SQL.Database(new Uint8Array(file));
+  pool = new Pool({
+    connectionString,
+    ssl: needsSsl(connectionString) ? { rejectUnauthorized: false } : undefined,
   });
 
-  return databasePromise;
+  return pool;
 }
 
-export async function persistDb(db: SqlDatabase) {
-  const databasePath = getDatabasePath();
-  fs.mkdirSync(path.dirname(databasePath), { recursive: true });
-  fs.writeFileSync(databasePath, Buffer.from(db.export()));
+export async function all<T>(db: DbClient, sql: string, params: QueryParam[] = []) {
+  const result = await db.query(sql, params);
+  return result.rows as T[];
 }
 
-export function all<T>(db: SqlDatabase, sql: string, params: BindParams = []): T[] {
-  const statement = db.prepare(sql);
-  statement.bind(params);
-  const rows: T[] = [];
-
-  while (statement.step()) {
-    rows.push(statement.getAsObject() as T);
-  }
-
-  statement.free();
-  return rows;
+export async function getOne<T>(db: DbClient, sql: string, params: QueryParam[] = []) {
+  return (await all<T>(db, sql, params))[0];
 }
 
-export function getOne<T>(db: SqlDatabase, sql: string, params: BindParams = []) {
-  return all<T>(db, sql, params)[0];
+export async function run(db: DbClient, sql: string, params: QueryParam[] = []) {
+  await db.query(sql, params);
 }
 
-export async function run(db: SqlDatabase, sql: string, params: BindParams = []) {
-  db.run(sql, params);
-  await persistDb(db);
+function isPool(db: DbClient): db is Pool {
+  return "connect" in db;
 }
 
 export async function runBatch(
-  db: SqlDatabase,
-  statements: Array<{ sql: string; params?: BindParams }>,
+  db: DbClient,
+  statements: Array<{ sql: string; params?: QueryParam[] }>,
 ) {
-  db.exec("BEGIN");
-  try {
-    for (const statement of statements) {
-      db.run(statement.sql, statement.params ?? []);
+  if (isPool(db)) {
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      for (const statement of statements) {
+        await client.query(statement.sql, statement.params ?? []);
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
+    return;
   }
 
-  await persistDb(db);
+  try {
+    await db.query("BEGIN");
+    for (const statement of statements) {
+      await db.query(statement.sql, statement.params ?? []);
+    }
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
 }

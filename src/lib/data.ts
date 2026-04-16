@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import bcrypt from "bcryptjs";
 
-import { all, getDb, getOne, persistDb, run, runBatch } from "@/lib/db";
+import { all, getDb, getOne, run, runBatch } from "@/lib/db";
 import type { AppRole } from "@/lib/auth";
 import { type TaskWorkflowStatus } from "@/lib/task-workflow";
 
@@ -93,249 +93,21 @@ function todayDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function ensureProjectSchema() {
-  const db = await getDb();
-  const columns = all<{ name: string }>(db, "PRAGMA table_info(projects)");
-  const names = new Set(columns.map((column) => String(column.name)));
-
-  const statements: string[] = [];
-
-  if (!names.has("is_archived")) {
-    statements.push("ALTER TABLE projects ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0");
-  }
-
-  if (!names.has("archived_at")) {
-    statements.push("ALTER TABLE projects ADD COLUMN archived_at TEXT");
-  }
-
-  if (!names.has("updated_at")) {
-    statements.push("ALTER TABLE projects ADD COLUMN updated_at TEXT");
-  }
-
-  for (const statement of statements) {
-    await run(db, statement);
-  }
-
-  if (!names.has("updated_at")) {
-    await run(
-      db,
-      `
-        UPDATE projects
-        SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
-        WHERE updated_at IS NULL
-      `,
-    );
-  }
-
-  return db;
-}
-
-async function ensureTaskWorkflowSchema(db: Awaited<ReturnType<typeof getDb>>) {
-  const taskColumns = all<{ name: string; notnull: number }>(db, "PRAGMA table_info(tasks)");
-  const taskColumnNames = new Set(taskColumns.map((column) => String(column.name)));
-  const assigneeColumn = taskColumns.find((column) => String(column.name) === "assignee_id");
-  const taskTableSql =
-    getOne<{ sql: string }>(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")?.sql ?? "";
-  const taskUpdateTableSql =
-    getOne<{ sql: string }>(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_updates'")?.sql ??
-    "";
-
-  const needsTaskWorkflowMigration =
-    !taskTableSql ||
-    taskTableSql.includes("'blocked'") ||
-    taskTableSql.includes("'done'") ||
-    !taskTableSql.includes("'backlog'") ||
-    !taskTableSql.includes("'completed'");
-  const needsTaskUpdateWorkflowMigration =
-    !taskUpdateTableSql ||
-    taskUpdateTableSql.includes("'blocked'") ||
-    taskUpdateTableSql.includes("'done'") ||
-    !taskUpdateTableSql.includes("'backlog'") ||
-    !taskUpdateTableSql.includes("'completed'");
-  const needsCurrentBlockers = !taskColumnNames.has("current_blockers");
-  const needsNullableAssigneeMigration = Number(assigneeColumn?.notnull ?? 0) === 1;
-
-  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers && !needsNullableAssigneeMigration) {
-    return;
-  }
-
-  const latestLegacyBlockerSql = `
-    (
-      SELECT tu.blockers
-      FROM task_updates_legacy tu
-      WHERE tu.task_id = tasks_legacy.id
-        AND TRIM(tu.blockers) != ''
-      ORDER BY tu.created_at DESC
-      LIMIT 1
-    )
-  `;
-  const currentBlockersSelect = taskColumnNames.has("current_blockers")
-    ? `
-        COALESCE(
-          NULLIF(TRIM(tasks_legacy.current_blockers), ''),
-          ${latestLegacyBlockerSql},
-          CASE
-            WHEN tasks_legacy.status = 'blocked' THEN 'Blocked without detail saved.'
-            ELSE ''
-          END
-        )
-      `
-    : `
-        COALESCE(
-          ${latestLegacyBlockerSql},
-          CASE
-            WHEN tasks_legacy.status = 'blocked' THEN 'Blocked without detail saved.'
-            ELSE ''
-          END
-        )
-      `;
-
-  db.exec("PRAGMA foreign_keys = OFF");
-  db.exec("BEGIN");
-
-  try {
-    db.exec("ALTER TABLE task_updates RENAME TO task_updates_legacy");
-    db.exec("ALTER TABLE tasks RENAME TO tasks_legacy");
-
-    db.exec(`
-      CREATE TABLE tasks (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        strategy_id TEXT REFERENCES strategies(id) ON DELETE SET NULL,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
-        status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
-        assignee_id TEXT REFERENCES users(id),
-        estimated_hours REAL NOT NULL DEFAULT 0,
-        actual_hours REAL NOT NULL DEFAULT 0,
-        due_date TEXT,
-        result_note TEXT NOT NULL DEFAULT '',
-        current_blockers TEXT NOT NULL DEFAULT '',
-        created_by TEXT NOT NULL REFERENCES users(id),
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    db.exec(`
-      CREATE TABLE task_updates (
-        id TEXT PRIMARY KEY,
-        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-        user_id TEXT NOT NULL REFERENCES users(id),
-        status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
-        time_spent_hours REAL NOT NULL DEFAULT 0,
-        outcome TEXT NOT NULL DEFAULT '',
-        blockers TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    db.exec(`
-      INSERT INTO tasks (
-        id,
-        project_id,
-        strategy_id,
-        title,
-        description,
-        priority,
-        status,
-        assignee_id,
-        estimated_hours,
-        actual_hours,
-        due_date,
-        result_note,
-        current_blockers,
-        created_by,
-        created_at,
-        updated_at
-      )
-      SELECT
-        tasks_legacy.id,
-        tasks_legacy.project_id,
-        tasks_legacy.strategy_id,
-        tasks_legacy.title,
-        tasks_legacy.description,
-        tasks_legacy.priority,
-        CASE tasks_legacy.status
-          WHEN 'done' THEN 'completed'
-          WHEN 'blocked' THEN 'in_progress'
-          ELSE tasks_legacy.status
-        END,
-        tasks_legacy.assignee_id,
-        tasks_legacy.estimated_hours,
-        tasks_legacy.actual_hours,
-        tasks_legacy.due_date,
-        tasks_legacy.result_note,
-        ${currentBlockersSelect},
-        tasks_legacy.created_by,
-        tasks_legacy.created_at,
-        tasks_legacy.updated_at
-      FROM tasks_legacy
-    `);
-
-    db.exec(`
-      INSERT INTO task_updates (
-        id,
-        task_id,
-        user_id,
-        status,
-        time_spent_hours,
-        outcome,
-        blockers,
-        created_at
-      )
-      SELECT
-        task_updates_legacy.id,
-        task_updates_legacy.task_id,
-        task_updates_legacy.user_id,
-        CASE task_updates_legacy.status
-          WHEN 'done' THEN 'completed'
-          WHEN 'blocked' THEN 'in_progress'
-          ELSE task_updates_legacy.status
-        END,
-        task_updates_legacy.time_spent_hours,
-        task_updates_legacy.outcome,
-        task_updates_legacy.blockers,
-        task_updates_legacy.created_at
-      FROM task_updates_legacy
-    `);
-
-    db.exec("DROP TABLE task_updates_legacy");
-    db.exec("DROP TABLE tasks_legacy");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id)");
-    db.exec("CREATE INDEX IF NOT EXISTS idx_task_updates_task_id ON task_updates(task_id)");
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  } finally {
-    db.exec("PRAGMA foreign_keys = ON");
-  }
-
-  await persistDb(db);
-}
-
-async function ensureAppSchema() {
-  const db = await ensureProjectSchema();
-  await ensureTaskWorkflowSchema(db);
-  return db;
-}
-
 export async function getAdminDashboardData(reportDate?: string) {
-  const db = await ensureAppSchema();
+  const db = await getDb();
   const currentDate = todayDate();
 
-  const availableReportDates = all<{ reportDate: string }>(
-    db,
-    `
-      SELECT DISTINCT dr.report_date AS reportDate
-      FROM daily_reports dr
-      INNER JOIN projects p ON p.id = dr.project_id
-      WHERE IFNULL(p.is_archived, 0) = 0
-      ORDER BY dr.report_date DESC
-    `,
+  const availableReportDates = (
+    await all<{ reportDate: string }>(
+      db,
+      `
+        SELECT DISTINCT dr.report_date::text AS "reportDate"
+        FROM public.daily_reports dr
+        INNER JOIN public.projects p ON p.id = dr.project_id
+        WHERE NOT COALESCE(p.is_archived, false)
+        ORDER BY dr.report_date DESC
+      `,
+    )
   ).map((row) => row.reportDate);
 
   const activeReportDate =
@@ -347,193 +119,222 @@ export async function getAdminDashboardData(reportDate?: string) {
     ? availableReportDates
     : [activeReportDate, ...availableReportDates];
 
-  const stats = getOne<{
-    totalProjects: number;
-    openTasks: number;
-    activeEmployees: number;
-    todayHours: number;
-    blockedTasks: number;
-    overdueTasks: number;
-    unassignedTasks: number;
-    missingReports: number;
-    archivedProjects: number;
-  }>(
-    db,
-    `
-      SELECT
-        (SELECT COUNT(*) FROM projects WHERE IFNULL(is_archived, 0) = 0) AS totalProjects,
-        (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'completed' AND IFNULL(p.is_archived, 0) = 0
-        ) AS openTasks,
-        (SELECT COUNT(*) FROM users WHERE role = 'employee' AND is_active = 1) AS activeEmployees,
-        (
-          SELECT IFNULL(SUM(dr.total_hours), 0)
-          FROM daily_reports dr
-          INNER JOIN projects p ON p.id = dr.project_id
-          WHERE dr.report_date = ? AND IFNULL(p.is_archived, 0) = 0
-        ) AS todayHours,
-        (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'completed'
-            AND TRIM(IFNULL(t.current_blockers, '')) != ''
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS blockedTasks,
-        (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'completed'
-            AND t.due_date IS NOT NULL
-            AND t.due_date < ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS overdueTasks,
-        (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'completed'
-            AND t.assignee_id IS NULL
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS unassignedTasks,
-        (
-          (SELECT COUNT(*) FROM users WHERE role = 'employee' AND is_active = 1)
-          -
+  const stats =
+    (await getOne<{
+      totalProjects: number;
+      openTasks: number;
+      activeEmployees: number;
+      todayHours: number;
+      blockedTasks: number;
+      overdueTasks: number;
+      unassignedTasks: number;
+      missingReports: number;
+      archivedProjects: number;
+    }>(
+      db,
+      `
+        SELECT
+          (SELECT COUNT(*)::int FROM public.projects WHERE NOT COALESCE(is_archived, false)) AS "totalProjects",
           (
-            SELECT COUNT(DISTINCT dr.user_id)
-            FROM daily_reports dr
-            INNER JOIN projects p ON p.id = dr.project_id
-            WHERE dr.report_date = ? AND IFNULL(p.is_archived, 0) = 0
-          )
-        ) AS missingReports,
-        (SELECT COUNT(*) FROM projects WHERE IFNULL(is_archived, 0) = 1) AS archivedProjects
-    `,
-    [currentDate, currentDate, activeReportDate],
-  ) ?? {
-    totalProjects: 0,
-    openTasks: 0,
-    activeEmployees: 0,
-    todayHours: 0,
-    blockedTasks: 0,
-    overdueTasks: 0,
-    unassignedTasks: 0,
-    missingReports: 0,
-    archivedProjects: 0,
-  };
+            SELECT COUNT(*)::int
+            FROM public.tasks t
+            INNER JOIN public.projects p ON p.id = t.project_id
+            WHERE t.status != 'completed'
+              AND NOT COALESCE(p.is_archived, false)
+          ) AS "openTasks",
+          (
+            SELECT COUNT(*)::int
+            FROM public.users
+            WHERE role = 'employee' AND is_active = true
+          ) AS "activeEmployees",
+          (
+            SELECT COALESCE(SUM(dr.total_hours), 0)::float8
+            FROM public.daily_reports dr
+            INNER JOIN public.projects p ON p.id = dr.project_id
+            WHERE dr.report_date = $1::date
+              AND NOT COALESCE(p.is_archived, false)
+          ) AS "todayHours",
+          (
+            SELECT COUNT(*)::int
+            FROM public.tasks t
+            INNER JOIN public.projects p ON p.id = t.project_id
+            WHERE t.status != 'completed'
+              AND TRIM(COALESCE(t.current_blockers, '')) != ''
+              AND NOT COALESCE(p.is_archived, false)
+          ) AS "blockedTasks",
+          (
+            SELECT COUNT(*)::int
+            FROM public.tasks t
+            INNER JOIN public.projects p ON p.id = t.project_id
+            WHERE t.status != 'completed'
+              AND t.due_date IS NOT NULL
+              AND t.due_date < $2::date
+              AND NOT COALESCE(p.is_archived, false)
+          ) AS "overdueTasks",
+          (
+            SELECT COUNT(*)::int
+            FROM public.tasks t
+            INNER JOIN public.projects p ON p.id = t.project_id
+            WHERE t.status != 'completed'
+              AND t.assignee_id IS NULL
+              AND NOT COALESCE(p.is_archived, false)
+          ) AS "unassignedTasks",
+          (
+            (SELECT COUNT(*)::int FROM public.users WHERE role = 'employee' AND is_active = true)
+            -
+            (
+              SELECT COUNT(DISTINCT dr.user_id)::int
+              FROM public.daily_reports dr
+              INNER JOIN public.projects p ON p.id = dr.project_id
+              WHERE dr.report_date = $3::date
+                AND NOT COALESCE(p.is_archived, false)
+            )
+          ) AS "missingReports",
+          (
+            SELECT COUNT(*)::int
+            FROM public.projects
+            WHERE COALESCE(is_archived, false)
+          ) AS "archivedProjects"
+      `,
+      [currentDate, currentDate, activeReportDate],
+    )) ?? {
+      totalProjects: 0,
+      openTasks: 0,
+      activeEmployees: 0,
+      todayHours: 0,
+      blockedTasks: 0,
+      overdueTasks: 0,
+      unassignedTasks: 0,
+      missingReports: 0,
+      archivedProjects: 0,
+    };
 
-  const projects = all<AdminProjectRow>(
+  const projects = await all<AdminProjectRow>(
     db,
     `
       SELECT
         p.id,
         p.name,
-        p.client_name AS clientName,
-        p.source_channel AS sourceChannel,
+        p.client_name AS "clientName",
+        p.source_channel AS "sourceChannel",
         p.status,
         CASE
-          WHEN p.status != 'done' AND p.due_date IS NOT NULL AND p.due_date < ? THEN 'overdue'
+          WHEN p.status != 'done' AND p.due_date IS NOT NULL AND p.due_date < $1::date THEN 'overdue'
           ELSE p.status
-        END AS displayStatus,
-        p.due_date AS dueDate,
+        END AS "displayStatus",
+        p.due_date::text AS "dueDate",
         p.summary,
-        COUNT(t.id) AS totalTasks,
-        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS completedTasks,
-        SUM(CASE WHEN t.status != 'completed' THEN 1 ELSE 0 END) AS activeTasks,
-        SUM(CASE WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 1 ELSE 0 END) AS blockedTasks,
-        SUM(CASE WHEN t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < ? THEN 1 ELSE 0 END) AS overdueTasks
-      FROM projects p
-      LEFT JOIN tasks t ON t.project_id = p.id
-      WHERE IFNULL(p.is_archived, 0) = 0
+        COUNT(t.id)::int AS "totalTasks",
+        COALESCE(SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END), 0)::int AS "completedTasks",
+        COALESCE(SUM(CASE WHEN t.status != 'completed' THEN 1 ELSE 0 END), 0)::int AS "activeTasks",
+        COALESCE(
+          SUM(CASE WHEN t.status != 'completed' AND TRIM(COALESCE(t.current_blockers, '')) != '' THEN 1 ELSE 0 END),
+          0
+        )::int AS "blockedTasks",
+        COALESCE(
+          SUM(CASE WHEN t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < $2::date THEN 1 ELSE 0 END),
+          0
+        )::int AS "overdueTasks"
+      FROM public.projects p
+      LEFT JOIN public.tasks t ON t.project_id = p.id
+      WHERE NOT COALESCE(p.is_archived, false)
       GROUP BY p.id
       ORDER BY
         CASE
-          WHEN p.status != 'done' AND p.due_date IS NOT NULL AND p.due_date < ? THEN 0
+          WHEN p.status != 'done' AND p.due_date IS NOT NULL AND p.due_date < $3::date THEN 0
           WHEN p.status = 'active' THEN 1
           WHEN p.status = 'review' THEN 2
           WHEN p.status = 'planning' THEN 3
           ELSE 4
         END,
-        p.due_date ASC,
+        p.due_date ASC NULLS LAST,
         p.created_at DESC
     `,
     [currentDate, currentDate, currentDate],
   );
 
-  const archivedProjects = all<ArchivedProjectRow>(
+  const archivedProjects = await all<ArchivedProjectRow>(
     db,
     `
       SELECT
         p.id,
         p.name,
-        p.client_name AS clientName,
-        p.archived_at AS archivedAt,
-        COUNT(t.id) AS totalTasks
-      FROM projects p
-      LEFT JOIN tasks t ON t.project_id = p.id
-      WHERE IFNULL(p.is_archived, 0) = 1
+        p.client_name AS "clientName",
+        p.archived_at::text AS "archivedAt",
+        COUNT(t.id)::int AS "totalTasks"
+      FROM public.projects p
+      LEFT JOIN public.tasks t ON t.project_id = p.id
+      WHERE COALESCE(p.is_archived, false)
       GROUP BY p.id
-      ORDER BY p.archived_at DESC, p.created_at DESC
+      ORDER BY p.archived_at DESC NULLS LAST, p.created_at DESC
     `,
   );
 
-  const employees = all<{ id: string; fullName: string; email: string; role: AppRole }>(
+  const employees = await all<{ id: string; fullName: string; email: string; role: AppRole }>(
     db,
     `
-      SELECT id, full_name AS fullName, email, role
-      FROM users
-      WHERE is_active = 1
+      SELECT
+        id,
+        full_name AS "fullName",
+        email,
+        role
+      FROM public.users
+      WHERE is_active = true
       ORDER BY role ASC, full_name ASC
     `,
   );
 
-  const strategies = all<{ id: string; title: string; projectId: string; projectName: string }>(
+  const strategies = await all<{ id: string; title: string; projectId: string; projectName: string }>(
     db,
     `
-      SELECT s.id, s.title, s.project_id AS projectId, p.name AS projectName
-      FROM strategies s
-      INNER JOIN projects p ON p.id = s.project_id
-      WHERE IFNULL(p.is_archived, 0) = 0
+      SELECT
+        s.id,
+        s.title,
+        s.project_id AS "projectId",
+        p.name AS "projectName"
+      FROM public.strategies s
+      INNER JOIN public.projects p ON p.id = s.project_id
+      WHERE NOT COALESCE(p.is_archived, false)
       ORDER BY s.created_at DESC
     `,
   );
 
-  const tasks = all<DashboardTaskRow>(
+  const tasks = await all<DashboardTaskRow>(
     db,
     `
       SELECT
         t.id,
-        p.name AS projectName,
-        s.title AS strategyTitle,
+        p.name AS "projectName",
+        s.title AS "strategyTitle",
         t.title,
         t.status,
         t.priority,
-        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
-        t.due_date AS dueDate,
-        t.estimated_hours AS estimatedHours,
-        t.actual_hours AS actualHours,
-        t.result_note AS resultNote,
-        t.current_blockers AS currentBlockers
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
-      LEFT JOIN strategies s ON s.id = t.strategy_id
-      LEFT JOIN users u ON u.id = t.assignee_id
-      WHERE IFNULL(p.is_archived, 0) = 0
-      ORDER BY CASE
-        WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 0
-        WHEN t.status = 'in_progress' THEN 1
-        WHEN t.status = 'review' THEN 2
-        WHEN t.status = 'todo' THEN 3
-        WHEN t.status = 'backlog' THEN 4
-        ELSE 5
-      END, t.due_date ASC, t.updated_at DESC
+        COALESCE(u.full_name, 'Unassigned') AS "assigneeName",
+        t.due_date::text AS "dueDate",
+        t.estimated_hours::float8 AS "estimatedHours",
+        t.actual_hours::float8 AS "actualHours",
+        t.result_note AS "resultNote",
+        t.current_blockers AS "currentBlockers"
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
+      LEFT JOIN public.strategies s ON s.id = t.strategy_id
+      LEFT JOIN public.users u ON u.id = t.assignee_id
+      WHERE NOT COALESCE(p.is_archived, false)
+      ORDER BY
+        CASE
+          WHEN t.status != 'completed' AND TRIM(COALESCE(t.current_blockers, '')) != '' THEN 0
+          WHEN t.status = 'in_progress' THEN 1
+          WHEN t.status = 'review' THEN 2
+          WHEN t.status = 'todo' THEN 3
+          WHEN t.status = 'backlog' THEN 4
+          ELSE 5
+        END,
+        t.due_date ASC NULLS LAST,
+        t.updated_at DESC
     `,
   );
 
-  const updates = all<{
+  const updates = await all<{
     id: string;
     createdAt: string;
     status: string;
@@ -548,271 +349,284 @@ export async function getAdminDashboardData(reportDate?: string) {
     `
       SELECT
         tu.id,
-        tu.created_at AS createdAt,
+        tu.created_at::text AS "createdAt",
         tu.status,
-        tu.time_spent_hours AS timeSpentHours,
+        tu.time_spent_hours::float8 AS "timeSpentHours",
         tu.outcome,
         tu.blockers,
-        u.full_name AS userName,
-        t.title AS taskTitle,
-        p.name AS projectName
-      FROM task_updates tu
-      INNER JOIN users u ON u.id = tu.user_id
-      INNER JOIN tasks t ON t.id = tu.task_id
-      INNER JOIN projects p ON p.id = t.project_id
-      WHERE IFNULL(p.is_archived, 0) = 0
+        u.full_name AS "userName",
+        t.title AS "taskTitle",
+        p.name AS "projectName"
+      FROM public.task_updates tu
+      INNER JOIN public.users u ON u.id = tu.user_id
+      INNER JOIN public.tasks t ON t.id = tu.task_id
+      INNER JOIN public.projects p ON p.id = t.project_id
+      WHERE NOT COALESCE(p.is_archived, false)
       ORDER BY tu.created_at DESC
       LIMIT 10
     `,
   );
 
-  const reportSummary = getOne<{
-    totalHours: number;
-    reportsCount: number;
-    employeeCount: number;
-    projectCount: number;
-  }>(
-    db,
-    `
-      SELECT
-        IFNULL(SUM(dr.total_hours), 0) AS totalHours,
-        COUNT(*) AS reportsCount,
-        COUNT(DISTINCT dr.user_id) AS employeeCount,
-        COUNT(DISTINCT dr.project_id) AS projectCount
-      FROM daily_reports dr
-      INNER JOIN projects p ON p.id = dr.project_id
-      WHERE dr.report_date = ? AND IFNULL(p.is_archived, 0) = 0
-    `,
-    [activeReportDate],
-  ) ?? {
-    totalHours: 0,
-    reportsCount: 0,
-    employeeCount: 0,
-    projectCount: 0,
-  };
+  const reportSummary =
+    (await getOne<{
+      totalHours: number;
+      reportsCount: number;
+      employeeCount: number;
+      projectCount: number;
+    }>(
+      db,
+      `
+        SELECT
+          COALESCE(SUM(dr.total_hours), 0)::float8 AS "totalHours",
+          COUNT(*)::int AS "reportsCount",
+          COUNT(DISTINCT dr.user_id)::int AS "employeeCount",
+          COUNT(DISTINCT dr.project_id)::int AS "projectCount"
+        FROM public.daily_reports dr
+        INNER JOIN public.projects p ON p.id = dr.project_id
+        WHERE dr.report_date = $1::date
+          AND NOT COALESCE(p.is_archived, false)
+      `,
+      [activeReportDate],
+    )) ?? {
+      totalHours: 0,
+      reportsCount: 0,
+      employeeCount: 0,
+      projectCount: 0,
+    };
 
-  const reports = all<AdminDailyReportRow>(
+  const reports = await all<AdminDailyReportRow>(
     db,
     `
       SELECT
         dr.id,
-        dr.report_date AS reportDate,
-        dr.total_hours AS totalHours,
+        dr.report_date::text AS "reportDate",
+        dr.total_hours::float8 AS "totalHours",
         dr.summary,
-        dr.next_steps AS nextSteps,
-        u.full_name AS userName,
-        p.name AS projectName
-      FROM daily_reports dr
-      INNER JOIN users u ON u.id = dr.user_id
-      INNER JOIN projects p ON p.id = dr.project_id
-      WHERE dr.report_date = ? AND IFNULL(p.is_archived, 0) = 0
+        dr.next_steps AS "nextSteps",
+        u.full_name AS "userName",
+        p.name AS "projectName"
+      FROM public.daily_reports dr
+      INNER JOIN public.users u ON u.id = dr.user_id
+      INNER JOIN public.projects p ON p.id = dr.project_id
+      WHERE dr.report_date = $1::date
+        AND NOT COALESCE(p.is_archived, false)
       ORDER BY p.name ASC, u.full_name ASC
     `,
     [activeReportDate],
   );
 
-  const workload = all<AdminEmployeeWorkloadRow>(
+  const workload = await all<AdminEmployeeWorkloadRow>(
     db,
     `
       SELECT
         u.id,
-        u.full_name AS fullName,
+        u.full_name AS "fullName",
         u.email,
         (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
+          SELECT COUNT(*)::int
+          FROM public.tasks t
+          INNER JOIN public.projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
             AND t.status != 'completed'
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS activeTasks,
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "activeTasks",
         (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
+          SELECT COUNT(*)::int
+          FROM public.tasks t
+          INNER JOIN public.projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
             AND t.status != 'completed'
-            AND TRIM(IFNULL(t.current_blockers, '')) != ''
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS blockedTasks,
+            AND TRIM(COALESCE(t.current_blockers, '')) != ''
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "blockedTasks",
         (
-          SELECT COUNT(*)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
+          SELECT COUNT(*)::int
+          FROM public.tasks t
+          INNER JOIN public.projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
             AND t.status != 'completed'
             AND t.due_date IS NOT NULL
-            AND t.due_date < ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS overdueTasks,
+            AND t.due_date < $1::date
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "overdueTasks",
         (
-          SELECT COUNT(DISTINCT t.project_id)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
+          SELECT COUNT(DISTINCT t.project_id)::int
+          FROM public.tasks t
+          INNER JOIN public.projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
             AND t.status != 'completed'
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS activeProjects,
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "activeProjects",
         (
-          SELECT IFNULL(SUM(t.estimated_hours), 0)
-          FROM tasks t
-          INNER JOIN projects p ON p.id = t.project_id
+          SELECT COALESCE(SUM(t.estimated_hours), 0)::float8
+          FROM public.tasks t
+          INNER JOIN public.projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
             AND t.status != 'completed'
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS queuedHours,
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "queuedHours",
         (
-          SELECT COUNT(*)
-          FROM daily_reports dr
-          INNER JOIN projects p ON p.id = dr.project_id
+          SELECT COUNT(*)::int
+          FROM public.daily_reports dr
+          INNER JOIN public.projects p ON p.id = dr.project_id
           WHERE dr.user_id = u.id
-            AND dr.report_date = ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS reportCount,
+            AND dr.report_date = $2::date
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "reportCount",
         (
-          SELECT IFNULL(SUM(dr.total_hours), 0)
-          FROM daily_reports dr
-          INNER JOIN projects p ON p.id = dr.project_id
+          SELECT COALESCE(SUM(dr.total_hours), 0)::float8
+          FROM public.daily_reports dr
+          INNER JOIN public.projects p ON p.id = dr.project_id
           WHERE dr.user_id = u.id
-            AND dr.report_date = ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS reportHours
-      FROM users u
-      WHERE u.role = 'employee' AND u.is_active = 1
-      ORDER BY activeTasks DESC, blockedTasks DESC, overdueTasks DESC, u.full_name ASC
+            AND dr.report_date = $3::date
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "reportHours"
+      FROM public.users u
+      WHERE u.role = 'employee'
+        AND u.is_active = true
+      ORDER BY "activeTasks" DESC, "blockedTasks" DESC, "overdueTasks" DESC, u.full_name ASC
     `,
     [currentDate, activeReportDate, activeReportDate],
   );
 
-  const overdueTasks = all<AdminTaskAlertRow>(
+  const overdueTasks = await all<AdminTaskAlertRow>(
     db,
     `
       SELECT
         t.id,
         t.title,
-        p.name AS projectName,
-        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
+        p.name AS "projectName",
+        COALESCE(u.full_name, 'Unassigned') AS "assigneeName",
         t.priority,
-        t.due_date AS dueDate,
-        t.result_note AS resultNote
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
-      LEFT JOIN users u ON u.id = t.assignee_id
+        t.due_date::text AS "dueDate",
+        t.result_note AS "resultNote"
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
+      LEFT JOIN public.users u ON u.id = t.assignee_id
       WHERE t.status != 'completed'
         AND t.due_date IS NOT NULL
-        AND t.due_date < ?
-        AND IFNULL(p.is_archived, 0) = 0
-      ORDER BY t.due_date ASC, CASE t.priority
-        WHEN 'urgent' THEN 0
-        WHEN 'high' THEN 1
-        WHEN 'medium' THEN 2
-        ELSE 3
-      END
+        AND t.due_date < $1::date
+        AND NOT COALESCE(p.is_archived, false)
+      ORDER BY
+        t.due_date ASC,
+        CASE t.priority
+          WHEN 'urgent' THEN 0
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          ELSE 3
+        END
       LIMIT 8
     `,
     [currentDate],
   );
 
-  const blockedTasks = all<AdminTaskAlertRow>(
+  const blockedTasks = await all<AdminTaskAlertRow>(
     db,
     `
       SELECT
         t.id,
         t.title,
-        p.name AS projectName,
-        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
+        p.name AS "projectName",
+        COALESCE(u.full_name, 'Unassigned') AS "assigneeName",
         t.priority,
-        t.due_date AS dueDate,
-        t.result_note AS resultNote,
+        t.due_date::text AS "dueDate",
+        t.result_note AS "resultNote",
         t.current_blockers AS blockers
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
-      LEFT JOIN users u ON u.id = t.assignee_id
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
+      LEFT JOIN public.users u ON u.id = t.assignee_id
       WHERE t.status != 'completed'
-        AND TRIM(IFNULL(t.current_blockers, '')) != ''
-        AND IFNULL(p.is_archived, 0) = 0
-      ORDER BY t.due_date ASC, t.updated_at DESC
+        AND TRIM(COALESCE(t.current_blockers, '')) != ''
+        AND NOT COALESCE(p.is_archived, false)
+      ORDER BY t.due_date ASC NULLS LAST, t.updated_at DESC
       LIMIT 8
     `,
   );
 
-  const unassignedTasks = all<AdminTaskAlertRow>(
+  const unassignedTasks = await all<AdminTaskAlertRow>(
     db,
     `
       SELECT
         t.id,
         t.title,
-        p.name AS projectName,
-        'Unassigned' AS assigneeName,
+        p.name AS "projectName",
+        'Unassigned' AS "assigneeName",
         t.priority,
-        t.due_date AS dueDate,
-        t.result_note AS resultNote,
+        t.due_date::text AS "dueDate",
+        t.result_note AS "resultNote",
         t.current_blockers AS blockers
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
       WHERE t.status != 'completed'
         AND t.assignee_id IS NULL
-        AND IFNULL(p.is_archived, 0) = 0
-      ORDER BY CASE t.priority
-        WHEN 'urgent' THEN 0
-        WHEN 'high' THEN 1
-        WHEN 'medium' THEN 2
-        ELSE 3
-      END, t.created_at DESC
+        AND NOT COALESCE(p.is_archived, false)
+      ORDER BY
+        CASE t.priority
+          WHEN 'urgent' THEN 0
+          WHEN 'high' THEN 1
+          WHEN 'medium' THEN 2
+          ELSE 3
+        END,
+        t.created_at DESC
       LIMIT 8
     `,
   );
 
-  const reportMonitor: AdminReportMonitorRow[] = all<Omit<AdminReportMonitorRow, "status">>(
+  const reportMonitorRows = await all<Omit<AdminReportMonitorRow, "status">>(
     db,
     `
       SELECT
         u.id,
-        u.full_name AS fullName,
+        u.full_name AS "fullName",
         u.email,
         (
-          SELECT COUNT(*)
-          FROM daily_reports dr
-          INNER JOIN projects p ON p.id = dr.project_id
+          SELECT COUNT(*)::int
+          FROM public.daily_reports dr
+          INNER JOIN public.projects p ON p.id = dr.project_id
           WHERE dr.user_id = u.id
-            AND dr.report_date = ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS reportCount,
+            AND dr.report_date = $1::date
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "reportCount",
         (
-          SELECT IFNULL(SUM(dr.total_hours), 0)
-          FROM daily_reports dr
-          INNER JOIN projects p ON p.id = dr.project_id
+          SELECT COALESCE(SUM(dr.total_hours), 0)::float8
+          FROM public.daily_reports dr
+          INNER JOIN public.projects p ON p.id = dr.project_id
           WHERE dr.user_id = u.id
-            AND dr.report_date = ?
-            AND IFNULL(p.is_archived, 0) = 0
-        ) AS totalHours,
+            AND dr.report_date = $2::date
+            AND NOT COALESCE(p.is_archived, false)
+        ) AS "totalHours",
         (
-          SELECT GROUP_CONCAT(projectName, ', ')
+          SELECT STRING_AGG(project_name, ', ')
           FROM (
-            SELECT DISTINCT p.name AS projectName
-            FROM daily_reports dr
-            INNER JOIN projects p ON p.id = dr.project_id
+            SELECT DISTINCT p.name AS project_name
+            FROM public.daily_reports dr
+            INNER JOIN public.projects p ON p.id = dr.project_id
             WHERE dr.user_id = u.id
-              AND dr.report_date = ?
-              AND IFNULL(p.is_archived, 0) = 0
+              AND dr.report_date = $3::date
+              AND NOT COALESCE(p.is_archived, false)
             ORDER BY p.name ASC
-          )
-        ) AS projectNames
-      FROM users u
-      WHERE u.role = 'employee' AND u.is_active = 1
+          ) project_names
+        ) AS "projectNames"
+      FROM public.users u
+      WHERE u.role = 'employee'
+        AND u.is_active = true
       ORDER BY u.full_name ASC
     `,
     [activeReportDate, activeReportDate, activeReportDate],
-  ).map((row) => ({
-    ...row,
-    status: (row.reportCount > 0 ? "submitted" : "missing") as AdminReportMonitorRow["status"],
-  })).sort((left, right) => {
-    if (left.status !== right.status) {
-      return left.status === "missing" ? -1 : 1;
-    }
+  );
 
-    return left.fullName.localeCompare(right.fullName);
-  });
+  const reportMonitor: AdminReportMonitorRow[] = reportMonitorRows
+    .map((row) => ({
+      ...row,
+      status: (row.reportCount > 0 ? "submitted" : "missing") as AdminReportMonitorRow["status"],
+    }))
+    .sort((left, right) => {
+      if (left.status !== right.status) {
+        return left.status === "missing" ? -1 : 1;
+      }
+
+      return left.fullName.localeCompare(right.fullName);
+    });
 
   return {
     stats,
@@ -835,9 +649,9 @@ export async function getAdminDashboardData(reportDate?: string) {
 }
 
 export async function getEmployeeDashboardData(userId: string) {
-  const db = await ensureAppSchema();
+  const db = await getDb();
 
-  const tasks = all<{
+  const tasks = await all<{
     id: string;
     projectName: string;
     strategyTitle: string | null;
@@ -855,48 +669,51 @@ export async function getEmployeeDashboardData(userId: string) {
     `
       SELECT
         t.id,
-        p.name AS projectName,
-        s.title AS strategyTitle,
+        p.name AS "projectName",
+        s.title AS "strategyTitle",
         t.title,
         t.description,
         t.status,
         t.priority,
-        t.due_date AS dueDate,
-        t.estimated_hours AS estimatedHours,
-        t.actual_hours AS actualHours,
-        t.result_note AS resultNote,
-        t.current_blockers AS currentBlockers
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
-      LEFT JOIN strategies s ON s.id = t.strategy_id
-      WHERE t.assignee_id = ?
-        AND IFNULL(p.is_archived, 0) = 0
-      ORDER BY CASE
-        WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 0
-        WHEN t.status = 'in_progress' THEN 1
-        WHEN t.status = 'review' THEN 2
-        WHEN t.status = 'todo' THEN 3
-        WHEN t.status = 'backlog' THEN 4
-        ELSE 5
-      END, t.due_date ASC, t.updated_at DESC
+        t.due_date::text AS "dueDate",
+        t.estimated_hours::float8 AS "estimatedHours",
+        t.actual_hours::float8 AS "actualHours",
+        t.result_note AS "resultNote",
+        t.current_blockers AS "currentBlockers"
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
+      LEFT JOIN public.strategies s ON s.id = t.strategy_id
+      WHERE t.assignee_id = $1::uuid
+        AND NOT COALESCE(p.is_archived, false)
+      ORDER BY
+        CASE
+          WHEN t.status != 'completed' AND TRIM(COALESCE(t.current_blockers, '')) != '' THEN 0
+          WHEN t.status = 'in_progress' THEN 1
+          WHEN t.status = 'review' THEN 2
+          WHEN t.status = 'todo' THEN 3
+          WHEN t.status = 'backlog' THEN 4
+          ELSE 5
+        END,
+        t.due_date ASC NULLS LAST,
+        t.updated_at DESC
     `,
     [userId],
   );
 
-  const projectOptions = all<{ id: string; name: string }>(
+  const projectOptions = await all<{ id: string; name: string }>(
     db,
     `
       SELECT DISTINCT p.id, p.name
-      FROM tasks t
-      INNER JOIN projects p ON p.id = t.project_id
-      WHERE t.assignee_id = ?
-        AND IFNULL(p.is_archived, 0) = 0
+      FROM public.tasks t
+      INNER JOIN public.projects p ON p.id = t.project_id
+      WHERE t.assignee_id = $1::uuid
+        AND NOT COALESCE(p.is_archived, false)
       ORDER BY p.name ASC
     `,
     [userId],
   );
 
-  const reports = all<{
+  const reports = await all<{
     id: string;
     reportDate: string;
     summary: string;
@@ -908,15 +725,15 @@ export async function getEmployeeDashboardData(userId: string) {
     `
       SELECT
         dr.id,
-        dr.report_date AS reportDate,
+        dr.report_date::text AS "reportDate",
         dr.summary,
-        dr.next_steps AS nextSteps,
-        dr.total_hours AS totalHours,
-        p.name AS projectName
-      FROM daily_reports dr
-      INNER JOIN projects p ON p.id = dr.project_id
-      WHERE dr.user_id = ?
-        AND IFNULL(p.is_archived, 0) = 0
+        dr.next_steps AS "nextSteps",
+        dr.total_hours::float8 AS "totalHours",
+        p.name AS "projectName"
+      FROM public.daily_reports dr
+      INNER JOIN public.projects p ON p.id = dr.project_id
+      WHERE dr.user_id = $1::uuid
+        AND NOT COALESCE(p.is_archived, false)
       ORDER BY dr.report_date DESC, dr.created_at DESC
     `,
     [userId],
@@ -937,8 +754,8 @@ export async function createUser(input: {
   await run(
     db,
     `
-      INSERT INTO users (id, full_name, email, password_hash, role)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO public.users (id, full_name, email, password_hash, role)
+      VALUES ($1::uuid, $2, $3, $4, $5)
     `,
     [crypto.randomUUID(), input.fullName, input.email.toLowerCase(), passwordHash, input.role],
   );
@@ -953,13 +770,22 @@ export async function createProject(input: {
   summary: string;
   createdBy: string;
 }) {
-  const db = await ensureAppSchema();
+  const db = await getDb();
 
   await run(
     db,
     `
-      INSERT INTO projects (id, name, client_name, source_channel, status, due_date, summary, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO public.projects (
+        id,
+        name,
+        client_name,
+        source_channel,
+        status,
+        due_date,
+        summary,
+        created_by
+      )
+      VALUES ($1::uuid, $2, $3, $4, $5, $6::date, $7, $8::uuid)
     `,
     [
       crypto.randomUUID(),
@@ -983,8 +809,12 @@ export async function updateProject(input: {
   dueDate: string | null;
   summary: string;
 }) {
-  const db = await ensureAppSchema();
-  const project = getOne<{ id: string }>(db, "SELECT id FROM projects WHERE id = ?", [input.projectId]);
+  const db = await getDb();
+  const project = await getOne<{ id: string }>(
+    db,
+    "SELECT id FROM public.projects WHERE id = $1::uuid",
+    [input.projectId],
+  );
 
   if (!project) {
     throw new Error("Project not found.");
@@ -993,16 +823,16 @@ export async function updateProject(input: {
   await run(
     db,
     `
-      UPDATE projects
+      UPDATE public.projects
       SET
-        name = ?,
-        client_name = ?,
-        source_channel = ?,
-        status = ?,
-        due_date = ?,
-        summary = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
+        name = $1,
+        client_name = $2,
+        source_channel = $3,
+        status = $4,
+        due_date = $5::date,
+        summary = $6,
+        updated_at = now()
+      WHERE id = $7::uuid
     `,
     [
       input.name,
@@ -1020,8 +850,12 @@ export async function setProjectArchivedState(input: {
   projectId: string;
   archived: boolean;
 }) {
-  const db = await ensureAppSchema();
-  const project = getOne<{ id: string }>(db, "SELECT id FROM projects WHERE id = ?", [input.projectId]);
+  const db = await getDb();
+  const project = await getOne<{ id: string }>(
+    db,
+    "SELECT id FROM public.projects WHERE id = $1::uuid",
+    [input.projectId],
+  );
 
   if (!project) {
     throw new Error("Project not found.");
@@ -1030,26 +864,26 @@ export async function setProjectArchivedState(input: {
   await run(
     db,
     `
-      UPDATE projects
+      UPDATE public.projects
       SET
-        is_archived = ?,
-        archived_at = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
+        is_archived = $1,
+        archived_at = $2::timestamptz,
+        updated_at = now()
+      WHERE id = $3::uuid
     `,
-    [
-      input.archived ? 1 : 0,
-      input.archived ? new Date().toISOString() : null,
-      input.projectId,
-    ],
+    [input.archived, input.archived ? new Date().toISOString() : null, input.projectId],
   );
 }
 
 export async function deleteProjectPermanently(projectId: string) {
-  const db = await ensureAppSchema();
-  const project = getOne<{ id: string; is_archived: number }>(
+  const db = await getDb();
+  const project = await getOne<{ id: string; is_archived: boolean }>(
     db,
-    "SELECT id, IFNULL(is_archived, 0) AS is_archived FROM projects WHERE id = ?",
+    `
+      SELECT id, COALESCE(is_archived, false) AS is_archived
+      FROM public.projects
+      WHERE id = $1::uuid
+    `,
     [projectId],
   );
 
@@ -1061,31 +895,7 @@ export async function deleteProjectPermanently(projectId: string) {
     throw new Error("Archive the project before deleting it permanently.");
   }
 
-  await runBatch(db, [
-    {
-      sql: `
-        DELETE FROM task_updates
-        WHERE task_id IN (SELECT id FROM tasks WHERE project_id = ?)
-      `,
-      params: [projectId],
-    },
-    {
-      sql: "DELETE FROM daily_reports WHERE project_id = ?",
-      params: [projectId],
-    },
-    {
-      sql: "DELETE FROM tasks WHERE project_id = ?",
-      params: [projectId],
-    },
-    {
-      sql: "DELETE FROM strategies WHERE project_id = ?",
-      params: [projectId],
-    },
-    {
-      sql: "DELETE FROM projects WHERE id = ?",
-      params: [projectId],
-    },
-  ]);
+  await run(db, "DELETE FROM public.projects WHERE id = $1::uuid", [projectId]);
 }
 
 export async function createStrategy(input: {
@@ -1100,8 +910,8 @@ export async function createStrategy(input: {
   await run(
     db,
     `
-      INSERT INTO strategies (id, project_id, title, summary, objective, created_by)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO public.strategies (id, project_id, title, summary, objective, created_by)
+      VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid)
     `,
     [
       crypto.randomUUID(),
@@ -1126,12 +936,12 @@ export async function createTask(input: {
   dueDate: string | null;
   createdBy: string;
 }) {
-  const db = await ensureAppSchema();
+  const db = await getDb();
 
   await run(
     db,
     `
-      INSERT INTO tasks (
+      INSERT INTO public.tasks (
         id,
         project_id,
         strategy_id,
@@ -1145,7 +955,7 @@ export async function createTask(input: {
         current_blockers,
         created_by
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9::float8, $10::date, $11, $12::uuid)
     `,
     [
       crypto.randomUUID(),
@@ -1172,8 +982,12 @@ export async function updateTaskProgress(input: {
   outcome: string;
   blockers: string;
 }) {
-  const db = await ensureAppSchema();
-  const task = getOne<{ actual_hours: number }>(db, "SELECT actual_hours FROM tasks WHERE id = ?", [input.taskId]);
+  const db = await getDb();
+  const task = await getOne<{ actual_hours: number }>(
+    db,
+    "SELECT actual_hours::float8 AS actual_hours FROM public.tasks WHERE id = $1::uuid",
+    [input.taskId],
+  );
 
   if (!task) {
     throw new Error("Task not found.");
@@ -1184,9 +998,14 @@ export async function updateTaskProgress(input: {
   await runBatch(db, [
     {
       sql: `
-        UPDATE tasks
-        SET status = ?, actual_hours = ?, result_note = ?, current_blockers = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        UPDATE public.tasks
+        SET
+          status = $1,
+          actual_hours = $2::float8,
+          result_note = $3,
+          current_blockers = $4,
+          updated_at = now()
+        WHERE id = $5::uuid
       `,
       params: [
         input.status,
@@ -1198,8 +1017,16 @@ export async function updateTaskProgress(input: {
     },
     {
       sql: `
-        INSERT INTO task_updates (id, task_id, user_id, status, time_spent_hours, outcome, blockers)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO public.task_updates (
+          id,
+          task_id,
+          user_id,
+          status,
+          time_spent_hours,
+          outcome,
+          blockers
+        )
+        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::float8, $6, $7)
       `,
       params: [
         crypto.randomUUID(),
@@ -1227,10 +1054,21 @@ export async function createDailyReport(input: {
   await run(
     db,
     `
-      INSERT INTO daily_reports (id, project_id, user_id, report_date, summary, next_steps, total_hours)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(project_id, user_id, report_date)
-      DO UPDATE SET summary = excluded.summary, next_steps = excluded.next_steps, total_hours = excluded.total_hours
+      INSERT INTO public.daily_reports (
+        id,
+        project_id,
+        user_id,
+        report_date,
+        summary,
+        next_steps,
+        total_hours
+      )
+      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::date, $5, $6, $7::float8)
+      ON CONFLICT (project_id, user_id, report_date)
+      DO UPDATE SET
+        summary = EXCLUDED.summary,
+        next_steps = EXCLUDED.next_steps,
+        total_hours = EXCLUDED.total_hours
     `,
     [
       crypto.randomUUID(),
