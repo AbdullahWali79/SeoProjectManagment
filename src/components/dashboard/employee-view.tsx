@@ -1,8 +1,9 @@
 import { updateTaskProgressAction } from "@/app/actions";
 import { EmployeeWorkspaceShell } from "@/components/dashboard/employee-workspace-shell";
+import { getTaskStatusLabel, isTaskCompleted, TASK_WORKFLOW_STEPS } from "@/lib/task-workflow";
 
 function statusLabel(value: string) {
-  return value.replaceAll("_", " ");
+  return getTaskStatusLabel(value);
 }
 
 export function EmployeeView({
@@ -22,6 +23,7 @@ export function EmployeeView({
     estimatedHours: number;
     actualHours: number;
     resultNote: string;
+    currentBlockers: string;
   }>;
   projectOptions: Array<{ id: string; name: string }>;
   reports: Array<{
@@ -33,7 +35,7 @@ export function EmployeeView({
     projectName: string;
   }>;
 }) {
-  const activeTasks = tasks.filter((task) => task.status !== "done");
+  const activeTasks = tasks.filter((task) => !isTaskCompleted(task.status));
   const totalReportedHours = reports.reduce((sum, report) => sum + report.totalHours, 0);
   const focusTasks = tasks.slice(0, 4);
   const recentReports = reports.slice(0, 6);
@@ -254,6 +256,12 @@ export function EmployeeView({
                     {task.actualHours}h logged / {task.estimatedHours}h estimated
                   </span>
                 </div>
+                {task.currentBlockers ? (
+                  <div className="employee-blocker-note">
+                    <span className="pill pill-status-blocked">Blocked</span>
+                    <p className="subtle mini">{task.currentBlockers}</p>
+                  </div>
+                ) : null}
                 <form action={updateTaskProgressAction} className="form-grid">
                   <input type="hidden" name="taskId" value={task.id} />
                   <div className="field">
@@ -261,11 +269,11 @@ export function EmployeeView({
                       Status
                     </label>
                     <select id={`status-${task.id}`} name="status" className="select form-select" defaultValue={task.status}>
-                      <option value="todo">To do</option>
-                      <option value="in_progress">In progress</option>
-                      <option value="blocked">Blocked</option>
-                      <option value="review">Review</option>
-                      <option value="done">Done</option>
+                      {TASK_WORKFLOW_STEPS.map((step) => (
+                        <option key={step.value} value={step.value}>
+                          {step.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="field">
@@ -301,7 +309,8 @@ export function EmployeeView({
                       id={`blockers-${task.id}`}
                       name="blockers"
                       className="textarea form-control"
-                      placeholder="Optional blockers or dependency notes"
+                      defaultValue={task.currentBlockers}
+                      placeholder="Leave blank once the blocker is resolved"
                     />
                   </div>
                   <div className="field field-full">

@@ -302,6 +302,7 @@ textarea {
   font-weight: 700;
 }
 
+.pill-status-backlog,
 .pill-status-todo,
 .pill-status-planning {
   background: rgba(35, 100, 170, 0.12);
@@ -330,6 +331,7 @@ textarea {
   color: var(--warn);
 }
 
+.pill-status-completed,
 .pill-status-done {
   background: rgba(21, 128, 61, 0.14);
   color: var(--good);
@@ -1106,6 +1108,83 @@ textarea.form-control {
   margin-bottom: 0;
 }
 
+.admin-central-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 18px;
+}
+
+.admin-central-panel,
+.admin-health-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 250, 255, 0.9));
+}
+
+.admin-central-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-central-card,
+.admin-workflow-card,
+.admin-health-item {
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(20, 33, 50, 0.08);
+  background: rgba(255, 255, 255, 0.84);
+}
+
+.admin-central-card {
+  display: grid;
+  gap: 8px;
+}
+
+.admin-central-card strong,
+.admin-workflow-card strong {
+  font-size: 1.9rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+.admin-central-card p,
+.admin-workflow-card p,
+.admin-health-item p {
+  margin: 0;
+}
+
+.admin-workflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-workflow-card {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-health-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-health-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.admin-health-meta,
+.admin-task-blocker,
+.employee-blocker-note {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-health-meta {
+  justify-items: end;
+}
+
 .admin-insight-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1231,6 +1310,10 @@ textarea.form-control {
   display: block;
   border-radius: inherit;
   background: linear-gradient(135deg, rgba(35, 100, 170, 0.95), rgba(255, 122, 24, 0.92));
+}
+
+.admin-task-blocker {
+  margin-top: 8px;
 }
 
 .admin-project-manage {
@@ -1635,6 +1718,13 @@ textarea.form-control {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(250, 246, 234, 0.92));
 }
 
+.employee-blocker-note {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(185, 28, 28, 0.12);
+  background: rgba(255, 245, 245, 0.8);
+}
+
 .row {
   --grid-gutter-x: 1.5rem;
   --grid-gutter-y: 0;
@@ -1770,6 +1860,9 @@ textarea.form-control {
   .employee-dashboard,
   .dashboard-kpi-grid,
   .grid-4,
+  .admin-central-grid,
+  .admin-central-metrics,
+  .admin-workflow-grid,
   .admin-insight-grid,
   .employee-insight-grid,
   .admin-team-grid,
@@ -1910,7 +2003,8 @@ textarea.form-control {
 
   .admin-brief-item,
   .admin-list-row,
-  .employee-focus-item {
+  .employee-focus-item,
+  .admin-health-item {
     flex-direction: column;
   }
 
@@ -1924,6 +2018,7 @@ textarea.form-control {
   }
 
   .admin-brief-meta,
+  .admin-health-meta,
   .employee-focus-meta {
     justify-items: start;
   }

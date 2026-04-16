@@ -322,7 +322,7 @@ async function ensureAppSchema() {
 }
 
 export async function getAdminDashboardData(reportDate?: string) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
   const currentDate = todayDate();
 
   const availableReportDates = all<{ reportDate: string }>(
@@ -363,7 +363,7 @@ export async function getAdminDashboardData(reportDate?: string) {
           SELECT COUNT(*)
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'done' AND IFNULL(p.is_archived, 0) = 0
+          WHERE t.status != 'completed' AND IFNULL(p.is_archived, 0) = 0
         ) AS openTasks,
         (SELECT COUNT(*) FROM users WHERE role = 'employee' AND is_active = 1) AS activeEmployees,
         (
@@ -376,13 +376,15 @@ export async function getAdminDashboardData(reportDate?: string) {
           SELECT COUNT(*)
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status = 'blocked' AND IFNULL(p.is_archived, 0) = 0
+          WHERE t.status != 'completed'
+            AND TRIM(IFNULL(t.current_blockers, '')) != ''
+            AND IFNULL(p.is_archived, 0) = 0
         ) AS blockedTasks,
         (
           SELECT COUNT(*)
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
-          WHERE t.status != 'done'
+          WHERE t.status != 'completed'
             AND t.due_date IS NOT NULL
             AND t.due_date < ?
             AND IFNULL(p.is_archived, 0) = 0
@@ -427,9 +429,10 @@ export async function getAdminDashboardData(reportDate?: string) {
         p.due_date AS dueDate,
         p.summary,
         COUNT(t.id) AS totalTasks,
-        SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END) AS completedTasks,
-        SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END) AS activeTasks,
-        SUM(CASE WHEN t.status = 'blocked' THEN 1 ELSE 0 END) AS blockedTasks
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) AS completedTasks,
+        SUM(CASE WHEN t.status != 'completed' THEN 1 ELSE 0 END) AS activeTasks,
+        SUM(CASE WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 1 ELSE 0 END) AS blockedTasks,
+        SUM(CASE WHEN t.status != 'completed' AND t.due_date IS NOT NULL AND t.due_date < ? THEN 1 ELSE 0 END) AS overdueTasks
       FROM projects p
       LEFT JOIN tasks t ON t.project_id = p.id
       WHERE IFNULL(p.is_archived, 0) = 0
@@ -445,7 +448,7 @@ export async function getAdminDashboardData(reportDate?: string) {
         p.due_date ASC,
         p.created_at DESC
     `,
-    [currentDate, currentDate],
+    [currentDate, currentDate, currentDate],
   );
 
   const archivedProjects = all<ArchivedProjectRow>(
@@ -500,19 +503,21 @@ export async function getAdminDashboardData(reportDate?: string) {
         t.due_date AS dueDate,
         t.estimated_hours AS estimatedHours,
         t.actual_hours AS actualHours,
-        t.result_note AS resultNote
+        t.result_note AS resultNote,
+        t.current_blockers AS currentBlockers
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
       LEFT JOIN strategies s ON s.id = t.strategy_id
       INNER JOIN users u ON u.id = t.assignee_id
       WHERE IFNULL(p.is_archived, 0) = 0
-      ORDER BY CASE t.status
-        WHEN 'blocked' THEN 0
-        WHEN 'in_progress' THEN 1
-        WHEN 'review' THEN 2
-        WHEN 'todo' THEN 3
-        ELSE 4
-      END, t.due_date ASC
+      ORDER BY CASE
+        WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 0
+        WHEN t.status = 'in_progress' THEN 1
+        WHEN t.status = 'review' THEN 2
+        WHEN t.status = 'todo' THEN 3
+        WHEN t.status = 'backlog' THEN 4
+        ELSE 5
+      END, t.due_date ASC, t.updated_at DESC
     `,
   );
 
@@ -606,7 +611,7 @@ export async function getAdminDashboardData(reportDate?: string) {
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
-            AND t.status != 'done'
+            AND t.status != 'completed'
             AND IFNULL(p.is_archived, 0) = 0
         ) AS activeTasks,
         (
@@ -614,7 +619,8 @@ export async function getAdminDashboardData(reportDate?: string) {
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
-            AND t.status = 'blocked'
+            AND t.status != 'completed'
+            AND TRIM(IFNULL(t.current_blockers, '')) != ''
             AND IFNULL(p.is_archived, 0) = 0
         ) AS blockedTasks,
         (
@@ -622,7 +628,7 @@ export async function getAdminDashboardData(reportDate?: string) {
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
-            AND t.status != 'done'
+            AND t.status != 'completed'
             AND t.due_date IS NOT NULL
             AND t.due_date < ?
             AND IFNULL(p.is_archived, 0) = 0
@@ -632,7 +638,7 @@ export async function getAdminDashboardData(reportDate?: string) {
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
-            AND t.status != 'done'
+            AND t.status != 'completed'
             AND IFNULL(p.is_archived, 0) = 0
         ) AS activeProjects,
         (
@@ -640,7 +646,7 @@ export async function getAdminDashboardData(reportDate?: string) {
           FROM tasks t
           INNER JOIN projects p ON p.id = t.project_id
           WHERE t.assignee_id = u.id
-            AND t.status != 'done'
+            AND t.status != 'completed'
             AND IFNULL(p.is_archived, 0) = 0
         ) AS queuedHours,
         (
@@ -680,7 +686,7 @@ export async function getAdminDashboardData(reportDate?: string) {
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
       INNER JOIN users u ON u.id = t.assignee_id
-      WHERE t.status != 'done'
+      WHERE t.status != 'completed'
         AND t.due_date IS NOT NULL
         AND t.due_date < ?
         AND IFNULL(p.is_archived, 0) = 0
@@ -706,20 +712,12 @@ export async function getAdminDashboardData(reportDate?: string) {
         t.priority,
         t.due_date AS dueDate,
         t.result_note AS resultNote,
-        COALESCE(
-          (
-            SELECT tu.blockers
-            FROM task_updates tu
-            WHERE tu.task_id = t.id AND tu.blockers != ''
-            ORDER BY tu.created_at DESC
-            LIMIT 1
-          ),
-          'No blocker detail saved yet.'
-        ) AS blockers
+        t.current_blockers AS blockers
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
       INNER JOIN users u ON u.id = t.assignee_id
-      WHERE t.status = 'blocked'
+      WHERE t.status != 'completed'
+        AND TRIM(IFNULL(t.current_blockers, '')) != ''
         AND IFNULL(p.is_archived, 0) = 0
       ORDER BY t.due_date ASC, t.updated_at DESC
       LIMIT 8
@@ -797,7 +795,7 @@ export async function getAdminDashboardData(reportDate?: string) {
 }
 
 export async function getEmployeeDashboardData(userId: string) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
 
   const tasks = all<{
     id: string;
@@ -811,6 +809,7 @@ export async function getEmployeeDashboardData(userId: string) {
     estimatedHours: number;
     actualHours: number;
     resultNote: string;
+    currentBlockers: string;
   }>(
     db,
     `
@@ -825,19 +824,21 @@ export async function getEmployeeDashboardData(userId: string) {
         t.due_date AS dueDate,
         t.estimated_hours AS estimatedHours,
         t.actual_hours AS actualHours,
-        t.result_note AS resultNote
+        t.result_note AS resultNote,
+        t.current_blockers AS currentBlockers
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
       LEFT JOIN strategies s ON s.id = t.strategy_id
       WHERE t.assignee_id = ?
         AND IFNULL(p.is_archived, 0) = 0
-      ORDER BY CASE t.status
-        WHEN 'blocked' THEN 0
-        WHEN 'in_progress' THEN 1
-        WHEN 'review' THEN 2
-        WHEN 'todo' THEN 3
-        ELSE 4
-      END, t.due_date ASC
+      ORDER BY CASE
+        WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 0
+        WHEN t.status = 'in_progress' THEN 1
+        WHEN t.status = 'review' THEN 2
+        WHEN t.status = 'todo' THEN 3
+        WHEN t.status = 'backlog' THEN 4
+        ELSE 5
+      END, t.due_date ASC, t.updated_at DESC
     `,
     [userId],
   );
@@ -912,7 +913,7 @@ export async function createProject(input: {
   summary: string;
   createdBy: string;
 }) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
 
   await run(
     db,
@@ -942,7 +943,7 @@ export async function updateProject(input: {
   dueDate: string | null;
   summary: string;
 }) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
   const project = getOne<{ id: string }>(db, "SELECT id FROM projects WHERE id = ?", [input.projectId]);
 
   if (!project) {
@@ -979,7 +980,7 @@ export async function setProjectArchivedState(input: {
   projectId: string;
   archived: boolean;
 }) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
   const project = getOne<{ id: string }>(db, "SELECT id FROM projects WHERE id = ?", [input.projectId]);
 
   if (!project) {
@@ -1005,7 +1006,7 @@ export async function setProjectArchivedState(input: {
 }
 
 export async function deleteProjectPermanently(projectId: string) {
-  const db = await ensureProjectSchema();
+  const db = await ensureAppSchema();
   const project = getOne<{ id: string; is_archived: number }>(
     db,
     "SELECT id, IFNULL(is_archived, 0) AS is_archived FROM projects WHERE id = ?",
@@ -1079,19 +1080,32 @@ export async function createTask(input: {
   title: string;
   description: string;
   priority: "low" | "medium" | "high" | "urgent";
-  status: "todo" | "in_progress" | "blocked" | "review" | "done";
+  status: TaskWorkflowStatus;
   assigneeId: string;
   estimatedHours: number;
   dueDate: string | null;
   createdBy: string;
 }) {
-  const db = await getDb();
+  const db = await ensureAppSchema();
 
   await run(
     db,
     `
-      INSERT INTO tasks (id, project_id, strategy_id, title, description, priority, status, assignee_id, estimated_hours, due_date, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO tasks (
+        id,
+        project_id,
+        strategy_id,
+        title,
+        description,
+        priority,
+        status,
+        assignee_id,
+        estimated_hours,
+        due_date,
+        current_blockers,
+        created_by
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       crypto.randomUUID(),
@@ -1104,6 +1118,7 @@ export async function createTask(input: {
       input.assigneeId,
       input.estimatedHours,
       input.dueDate,
+      "",
       input.createdBy,
     ],
   );
@@ -1112,29 +1127,32 @@ export async function createTask(input: {
 export async function updateTaskProgress(input: {
   taskId: string;
   userId: string;
-  status: "todo" | "in_progress" | "blocked" | "review" | "done";
+  status: TaskWorkflowStatus;
   timeSpentHours: number;
   outcome: string;
   blockers: string;
 }) {
-  const db = await getDb();
+  const db = await ensureAppSchema();
   const task = getOne<{ actual_hours: number }>(db, "SELECT actual_hours FROM tasks WHERE id = ?", [input.taskId]);
 
   if (!task) {
     throw new Error("Task not found.");
   }
 
+  const currentBlockers = input.status === "completed" ? "" : input.blockers.trim();
+
   await runBatch(db, [
     {
       sql: `
         UPDATE tasks
-        SET status = ?, actual_hours = ?, result_note = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, actual_hours = ?, result_note = ?, current_blockers = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `,
       params: [
         input.status,
         Number((Number(task.actual_hours || 0) + input.timeSpentHours).toFixed(2)),
         input.outcome,
+        currentBlockers,
         input.taskId,
       ],
     },
@@ -1150,7 +1168,7 @@ export async function updateTaskProgress(input: {
         input.status,
         input.timeSpentHours,
         input.outcome,
-        input.blockers,
+        currentBlockers,
       ],
     },
   ]);

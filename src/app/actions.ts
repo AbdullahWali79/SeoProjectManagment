@@ -17,6 +17,7 @@ import {
   updateProject,
   updateTaskProgress,
 } from "@/lib/data";
+import { TASK_WORKFLOW_STATUSES } from "@/lib/task-workflow";
 
 const loginSchema = z.object({
   email: z.email("Valid email is required."),
@@ -60,7 +61,7 @@ const createTaskSchema = z.object({
   title: z.string().min(3),
   description: z.string().min(10),
   priority: z.enum(["low", "medium", "high", "urgent"]),
-  status: z.enum(["todo", "in_progress", "blocked", "review", "done"]),
+  status: z.enum(TASK_WORKFLOW_STATUSES),
   assigneeId: z.string().min(1),
   estimatedHours: z.coerce.number().min(0),
   dueDate: z.string().optional().transform((value) => value || null),
@@ -68,7 +69,7 @@ const createTaskSchema = z.object({
 
 const updateTaskSchema = z.object({
   taskId: z.string().min(1),
-  status: z.enum(["todo", "in_progress", "blocked", "review", "done"]),
+  status: z.enum(TASK_WORKFLOW_STATUSES),
   timeSpentHours: z.coerce.number().min(0),
   outcome: z.string().min(3),
   blockers: z.string().optional().default(""),

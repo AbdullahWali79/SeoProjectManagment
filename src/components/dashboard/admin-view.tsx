@@ -20,9 +20,19 @@ import {
   type DashboardTaskRow,
 } from "@/lib/data";
 import type { AppRole } from "@/lib/auth";
+import {
+  getTaskStatusLabel,
+  isTaskCompleted,
+  TASK_WORKFLOW_STEPS,
+  type TaskWorkflowStatus,
+} from "@/lib/task-workflow";
 
 function statusLabel(value: string) {
   return value.replaceAll("_", " ");
+}
+
+function taskStatusLabel(value: string) {
+  return getTaskStatusLabel(value);
 }
 
 function isPastDate(value: string | null) {
@@ -38,6 +48,86 @@ function progressForProject(project: AdminProjectRow) {
     totalTasks,
     completedTasks,
     progress,
+  };
+}
+
+function projectHealthDetails(project: AdminProjectRow) {
+  const { totalTasks, completedTasks, progress } = progressForProject(project);
+  const activeTasks = Number(project.activeTasks || 0);
+  const blockedTasks = Number(project.blockedTasks || 0);
+  const overdueTasks = Number(project.overdueTasks || 0);
+
+  if (project.status === "done" || (totalTasks > 0 && completedTasks === totalTasks)) {
+    return {
+      label: "Completed",
+      pillClass: "pill-status-done",
+      note: `${completedTasks}/${totalTasks} tasks completed.`,
+      rank: 3,
+      progress,
+      totalTasks,
+      completedTasks,
+      activeTasks,
+      blockedTasks,
+      overdueTasks,
+    };
+  }
+
+  if (project.displayStatus === "overdue" || overdueTasks > 0) {
+    return {
+      label: "Critical",
+      pillClass: "pill-status-overdue",
+      note: `${overdueTasks} overdue task${overdueTasks === 1 ? "" : "s"} need attention.`,
+      rank: 0,
+      progress,
+      totalTasks,
+      completedTasks,
+      activeTasks,
+      blockedTasks,
+      overdueTasks,
+    };
+  }
+
+  if (blockedTasks > 0) {
+    return {
+      label: "At risk",
+      pillClass: "pill-status-review",
+      note: `${blockedTasks} blocked task${blockedTasks === 1 ? "" : "s"} are slowing delivery.`,
+      rank: 1,
+      progress,
+      totalTasks,
+      completedTasks,
+      activeTasks,
+      blockedTasks,
+      overdueTasks,
+    };
+  }
+
+  if (totalTasks === 0) {
+    return {
+      label: "No tasks yet",
+      pillClass: "pill-status-planning",
+      note: "Project is created but execution tasks have not been added yet.",
+      rank: 2,
+      progress,
+      totalTasks,
+      completedTasks,
+      activeTasks,
+      blockedTasks,
+      overdueTasks,
+    };
+  }
+
+  return {
+    label: "Healthy",
+    pillClass: "pill-status-active",
+    note: `${activeTasks} active task${activeTasks === 1 ? "" : "s"} moving without current blockers.`,
+    rank: 2,
+    progress,
+    totalTasks,
+    completedTasks,
+    activeTasks,
+    blockedTasks,
+    overdueTasks,
   };
 }
 
@@ -154,6 +244,45 @@ export function AdminView({
       ),
     [filteredProjects],
   );
+  const workflowSummary = useMemo(() => {
+    const initialSummary = TASK_WORKFLOW_STEPS.reduce(
+      (summary, step) => {
+        summary[step.value] = 0;
+        return summary;
+      },
+      {} as Record<TaskWorkflowStatus, number>,
+    );
+
+    for (const task of tasks) {
+      const status = Object.prototype.hasOwnProperty.call(initialSummary, task.status)
+        ? (task.status as TaskWorkflowStatus)
+        : "backlog";
+      initialSummary[status] += 1;
+    }
+
+    return initialSummary;
+  }, [tasks]);
+  const projectHealthRows = useMemo(
+    () =>
+      filteredProjects
+        .map((project) => ({
+          ...project,
+          health: projectHealthDetails(project),
+        }))
+        .sort((left, right) => {
+          if (left.health.rank !== right.health.rank) {
+            return left.health.rank - right.health.rank;
+          }
+
+          return right.health.progress - left.health.progress;
+        }),
+    [filteredProjects],
+  );
+  const healthyProjectCount = projectHealthRows.filter((project) => project.health.label === "Healthy").length;
+  const criticalProjectCount = projectHealthRows.filter((project) => project.health.label === "Critical").length;
+  const atRiskProjectCount = projectHealthRows.filter((project) => project.health.label === "At risk").length;
+  const totalQueuedHours = workload.reduce((sum, member) => sum + member.queuedHours, 0);
+  const workloadPeak = workload[0];
   const hasProjectSearch = projectSearch.trim().length > 0;
 
   return (
@@ -173,14 +302,14 @@ export function AdminView({
           <div className="col-xl-7">
             <div className="admin-hero-copy">
               <p className="eyebrow">Operations cockpit</p>
-              <h2>Track project health, employee workload, and daily reporting from one tighter admin control room.</h2>
+              <h2>Track project health, team workload, blocked work, and the full task workflow from one admin dashboard.</h2>
               <p className="subtle">
-                Focus first on missing reports, overdue items, blocked execution, and project lifecycle changes without
-                jumping between views.
+                Focus first on active projects, overdue items, blocked execution, and the fixed workflow without
+                jumping between separate tools.
               </p>
               <div className="admin-hero-actions d-flex flex-wrap gap-2">
-                <a className="button button-secondary compact-button btn btn-primary" href="#admin-projects">
-                  Open project tracker
+                <a className="button button-secondary compact-button btn btn-primary" href="#admin-health">
+                  Open central dashboard
                 </a>
                 <a className="button button-ghost compact-button btn btn-light" href="#admin-reports">
                   Review report monitor
@@ -235,7 +364,7 @@ export function AdminView({
         <div className="panel stat-card stat-card-tasks">
           <p className="eyebrow">Open tasks</p>
           <p className="metric">{stats.openTasks}</p>
-          <p className="subtle">All non-complete tasks currently moving across the team.</p>
+          <p className="subtle">All non-completed tasks currently moving across the team.</p>
         </div>
         <div className="panel stat-card stat-card-team">
           <p className="eyebrow">Reports missing</p>
@@ -246,6 +375,112 @@ export function AdminView({
           <p className="eyebrow">Hours today</p>
           <p className="metric">{stats.todayHours}</p>
           <p className="subtle">Submitted hours visible from active projects right now.</p>
+        </div>
+      </section>
+
+      <section id="admin-health" className="admin-central-grid">
+        <section className="panel section admin-central-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Central admin dashboard</p>
+              <h3>One screen for the signals that matter most</h3>
+              <p className="subtle">
+                Active projects, overdue work, blocked tasks, team workload, and project health stay visible together.
+              </p>
+            </div>
+          </div>
+          <div className="admin-central-metrics">
+            <article className="admin-central-card">
+              <span className="eyebrow">Active projects</span>
+              <strong>{stats.totalProjects}</strong>
+              <p>{healthyProjectCount} healthy project{healthyProjectCount === 1 ? "" : "s"} currently moving.</p>
+            </article>
+            <article className="admin-central-card">
+              <span className="eyebrow">Overdue tasks</span>
+              <strong>{stats.overdueTasks}</strong>
+              <p>{criticalProjectCount} project{criticalProjectCount === 1 ? "" : "s"} need fast intervention.</p>
+            </article>
+            <article className="admin-central-card">
+              <span className="eyebrow">Blocked tasks</span>
+              <strong>{stats.blockedTasks}</strong>
+              <p>Separate blocker tracking keeps blocked work visible without breaking the workflow.</p>
+            </article>
+            <article className="admin-central-card">
+              <span className="eyebrow">Team workload</span>
+              <strong>{totalQueuedHours}h</strong>
+              <p>
+                {workloadPeak
+                  ? `${workloadPeak.fullName} carries the heaviest queue right now.`
+                  : "No employee workload has been queued yet."}
+              </p>
+            </article>
+            <article className="admin-central-card">
+              <span className="eyebrow">Project health</span>
+              <strong>{projectHealthRows.length}</strong>
+              <p>{atRiskProjectCount} at risk and {criticalProjectCount} critical across the live portfolio.</p>
+            </article>
+          </div>
+        </section>
+
+        <section className="panel section admin-central-panel">
+          <div className="section-head">
+            <div className="section-copy">
+              <p className="eyebrow">Task workflow</p>
+              <h3>Backlog to completed, with one fixed path</h3>
+              <p className="subtle">
+                Every task now follows the same disciplined route: Backlog, To do, In progress, Review, Completed.
+              </p>
+            </div>
+          </div>
+          <div className="admin-workflow-grid">
+            {TASK_WORKFLOW_STEPS.map((step) => (
+              <article key={step.value} className="admin-workflow-card">
+                <span className={`pill pill-status-${step.value}`}>{step.label}</span>
+                <strong>{workflowSummary[step.value] ?? 0}</strong>
+                <p>{step.note}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </section>
+
+      <section className="panel section admin-health-panel">
+        <div className="section-head">
+          <div className="section-copy">
+            <p className="eyebrow">Project health</p>
+            <h3>Health snapshot across active client projects</h3>
+            <p className="subtle">
+              Health is calculated from overdue pressure, blocker count, and completion progress so admin can act fast.
+            </p>
+          </div>
+        </div>
+        <div className="admin-health-list">
+          {projectHealthRows.length ? (
+            projectHealthRows.map((project) => (
+              <article key={project.id} className="admin-health-item">
+                <div>
+                  <strong>{project.name}</strong>
+                  <p className="subtle mini">
+                    {project.clientName} | {project.sourceChannel}
+                  </p>
+                  <p className="subtle mini">{project.health.note}</p>
+                </div>
+                <div className="admin-health-meta">
+                  <span className={`pill ${project.health.pillClass}`}>{project.health.label}</span>
+                  <span className="subtle mini">
+                    {project.health.progress}% complete | {project.health.completedTasks}/{project.health.totalTasks} completed
+                  </span>
+                  <span className="subtle mini">
+                    {project.health.activeTasks} open | {project.health.blockedTasks} blocked | {project.health.overdueTasks} overdue
+                  </span>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div className="report-empty">
+              {hasProjectSearch ? "No active projects match this search." : "No active projects are available yet."}
+            </div>
+          )}
         </div>
       </section>
 
@@ -488,7 +723,7 @@ export function AdminView({
                   <th>Task</th>
                   <th>Project</th>
                   <th>Assignee</th>
-                  <th>Status</th>
+                  <th>Workflow</th>
                   <th>Effort</th>
                   <th>Result</th>
                 </tr>
@@ -503,17 +738,23 @@ export function AdminView({
                     <td>{task.projectName}</td>
                     <td>{task.assigneeName}</td>
                     <td>
-                      <span className={`pill ${isPastDate(task.dueDate) && task.status !== "done" ? "pill-status-overdue" : `pill-status-${task.status}`}`}>
-                        {isPastDate(task.dueDate) && task.status !== "done" ? "overdue" : statusLabel(task.status)}
-                      </span>
+                      <span className={`pill pill-status-${task.status}`}>{taskStatusLabel(task.status)}</span>
                     </td>
                     <td>
                       {task.actualHours}h / {task.estimatedHours}h
-                      <div className={`subtle mini ${isPastDate(task.dueDate) && task.status !== "done" ? "admin-alert-note" : ""}`}>
+                      <div className={`subtle mini ${isPastDate(task.dueDate) && !isTaskCompleted(task.status) ? "admin-alert-note" : ""}`}>
                         {task.dueDate || "No due date"}
                       </div>
                     </td>
-                    <td>{task.resultNote || "Awaiting update"}</td>
+                    <td>
+                      <div>{task.resultNote || "Awaiting update"}</div>
+                      {task.currentBlockers ? (
+                        <div className="admin-task-blocker">
+                          <span className="pill pill-status-blocked">Blocked</span>
+                          <span className="subtle mini">{task.currentBlockers}</span>
+                        </div>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -654,7 +895,8 @@ export function AdminView({
                         <td>
                           <span className={`pill pill-status-${project.displayStatus}`}>{statusLabel(project.displayStatus)}</span>
                           <div className="subtle mini">
-                            {Number(project.activeTasks || 0)} active | {Number(project.blockedTasks || 0)} blocked
+                            {Number(project.activeTasks || 0)} active | {Number(project.blockedTasks || 0)} blocked |{" "}
+                            {Number(project.overdueTasks || 0)} overdue
                           </div>
                         </td>
                         <td>
@@ -663,7 +905,7 @@ export function AdminView({
                               <span className="admin-progress-bar" style={{ width: `${progress}%` }} />
                             </div>
                             <div className="subtle mini">
-                              {progress}% complete | {completedTasks}/{totalTasks} tasks done
+                              {progress}% complete | {completedTasks}/{totalTasks} tasks completed
                             </div>
                           </div>
                         </td>
@@ -860,7 +1102,7 @@ export function AdminView({
                     </td>
                     <td>{update.taskTitle}</td>
                     <td>
-                      <span className={`pill pill-status-${update.status}`}>{statusLabel(update.status)}</span>
+                      <span className={`pill pill-status-${update.status}`}>{taskStatusLabel(update.status)}</span>
                     </td>
                     <td>{update.timeSpentHours}</td>
                     <td>{update.outcome}</td>
@@ -929,7 +1171,7 @@ export function AdminView({
                           {task.assigneeName} | {task.projectName}
                         </p>
                       </div>
-                      <span className={`pill pill-status-${task.status}`}>{statusLabel(task.status)}</span>
+                      <span className={`pill pill-status-${task.status}`}>{taskStatusLabel(task.status)}</span>
                     </div>
                   ))
                 ) : (

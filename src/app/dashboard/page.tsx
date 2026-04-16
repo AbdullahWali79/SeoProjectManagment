@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { getAdminDashboardData, getEmployeeDashboardData } from "@/lib/data";
 import { AdminView } from "@/components/dashboard/admin-view";
 import { EmployeeView } from "@/components/dashboard/employee-view";
+import { isTaskCompleted } from "@/lib/task-workflow";
 
 function MessageNotice({ message }: { message?: string }) {
   if (!message) return null;
@@ -37,7 +38,7 @@ export default async function DashboardPage({
   const heroPrimaryMetric =
     user.role === "admin"
       ? `${adminData?.stats.openTasks ?? 0}`
-      : `${employeeData?.tasks.filter((task) => task.status !== "done").length ?? 0}`;
+      : `${employeeData?.tasks.filter((task) => !isTaskCompleted(task.status)).length ?? 0}`;
   const heroPrimaryLabel = user.role === "admin" ? "Open tasks in motion" : "Assigned tasks in motion";
   const heroSecondaryMetric =
     user.role === "admin"

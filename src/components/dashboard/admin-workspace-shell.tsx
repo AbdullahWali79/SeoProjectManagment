@@ -10,6 +10,7 @@ import {
 } from "@/app/actions";
 import { DashboardModal } from "@/components/dashboard/dashboard-modal";
 import type { AppRole } from "@/lib/auth";
+import { TASK_WORKFLOW_STEPS } from "@/lib/task-workflow";
 
 type ModalKey = "user" | "project" | "strategy" | "task" | null;
 
@@ -204,6 +205,12 @@ export function AdminWorkspaceShell({
       label: "Overview",
       note: "Daily command view",
       icon: "panel",
+    },
+    {
+      href: "#admin-health",
+      label: "Health",
+      note: "Central dashboard",
+      icon: "activity",
     },
     {
       href: "#admin-reports",
@@ -567,12 +574,12 @@ export function AdminWorkspaceShell({
               <label className="label" htmlFor="modal-task-status">
                 Initial status
               </label>
-              <select id="modal-task-status" name="status" className="select form-select" defaultValue="todo">
-                <option value="todo">To do</option>
-                <option value="in_progress">In progress</option>
-                <option value="blocked">Blocked</option>
-                <option value="review">Review</option>
-                <option value="done">Done</option>
+              <select id="modal-task-status" name="status" className="select form-select" defaultValue="backlog">
+                {TASK_WORKFLOW_STEPS.map((step) => (
+                  <option key={step.value} value={step.value}>
+                    {step.label}
+                  </option>
+                ))}
               </select>
             </div>
             <div className="field">
