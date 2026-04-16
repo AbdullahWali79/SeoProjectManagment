@@ -20,44 +20,52 @@ export async function loginWithPassword(email: string, password: string) {
     return { success: false as const, message: setupError };
   }
 
-  const db = await getDb();
-  const user = await getOne<{
-    id: string;
-    full_name: string;
-    email: string;
-    role: AppRole;
-    password_hash: string;
-    is_active: boolean;
-  }>(
-    db,
-    `
-      SELECT id, full_name, email, role, password_hash, is_active
-      FROM users
-      WHERE email = $1
-    `,
-    [email],
-  );
+  try {
+    const db = await getDb();
+    const user = await getOne<{
+      id: string;
+      full_name: string;
+      email: string;
+      role: AppRole;
+      password_hash: string;
+      is_active: boolean;
+    }>(
+      db,
+      `
+        SELECT id, full_name, email, role, password_hash, is_active
+        FROM users
+        WHERE email = $1
+      `,
+      [email],
+    );
 
-  if (!user || !user.is_active) {
-    return { success: false as const, message: "User not found or inactive." };
+    if (!user || !user.is_active) {
+      return { success: false as const, message: "User not found or inactive." };
+    }
+
+    const passwordOk = await bcrypt.compare(password, user.password_hash);
+    if (!passwordOk) {
+      return { success: false as const, message: "Wrong email or password." };
+    }
+
+    await setSession({ userId: user.id, role: user.role });
+
+    return {
+      success: true as const,
+      user: {
+        id: user.id,
+        fullName: user.full_name,
+        email: user.email,
+        role: user.role,
+      },
+    };
+  } catch {
+    return {
+      success: false as const,
+      message:
+        "Database connection ya schema issue aa raha hai. `DATABASE_URL` verify karo aur Supabase SQL schema dubara run karke redeploy karo.",
+    };
   }
-
-  const passwordOk = await bcrypt.compare(password, user.password_hash);
-  if (!passwordOk) {
-    return { success: false as const, message: "Wrong email or password." };
-  }
-
-  await setSession({ userId: user.id, role: user.role });
-
-  return {
-    success: true as const,
-    user: {
-      id: user.id,
-      fullName: user.full_name,
-      email: user.email,
-      role: user.role,
-    },
-  };
 }
 
 export async function logout() {
@@ -75,33 +83,38 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     return null;
   }
 
-  const db = await getDb();
-  const user = await getOne<{
-    id: string;
-    full_name: string;
-    email: string;
-    role: AppRole;
-  }>(
-    db,
-    `
-      SELECT id, full_name, email, role
-      FROM users
-      WHERE id = $1
-    `,
-    [session.userId],
-  );
+  try {
+    const db = await getDb();
+    const user = await getOne<{
+      id: string;
+      full_name: string;
+      email: string;
+      role: AppRole;
+    }>(
+      db,
+      `
+        SELECT id, full_name, email, role
+        FROM users
+        WHERE id = $1
+      `,
+      [session.userId],
+    );
 
-  if (!user) {
+    if (!user) {
+      await clearSession();
+      return null;
+    }
+
+    return {
+      id: user.id,
+      fullName: user.full_name,
+      email: user.email,
+      role: user.role,
+    };
+  } catch {
     await clearSession();
     return null;
   }
-
-  return {
-    id: user.id,
-    fullName: user.full_name,
-    email: user.email,
-    role: user.role,
-  };
 }
 
 export async function requireUser() {
