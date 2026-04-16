@@ -2,8 +2,9 @@ import crypto from "node:crypto";
 
 import bcrypt from "bcryptjs";
 
-import { all, getDb, getOne, run, runBatch } from "@/lib/db";
+import { all, getDb, getOne, persistDb, run, runBatch } from "@/lib/db";
 import type { AppRole } from "@/lib/auth";
+import { type TaskWorkflowStatus } from "@/lib/task-workflow";
 
 export type DashboardTaskRow = {
   id: string;
@@ -17,6 +18,7 @@ export type DashboardTaskRow = {
   estimatedHours: number;
   actualHours: number;
   resultNote: string;
+  currentBlockers: string;
 };
 
 export type AdminDailyReportRow = {
@@ -42,6 +44,7 @@ export type AdminProjectRow = {
   completedTasks: number | null;
   activeTasks: number | null;
   blockedTasks: number | null;
+  overdueTasks: number | null;
 };
 
 export type ArchivedProjectRow = {
@@ -124,6 +127,197 @@ async function ensureProjectSchema() {
     );
   }
 
+  return db;
+}
+
+async function ensureTaskWorkflowSchema(db: Awaited<ReturnType<typeof getDb>>) {
+  const taskColumns = all<{ name: string }>(db, "PRAGMA table_info(tasks)");
+  const taskColumnNames = new Set(taskColumns.map((column) => String(column.name)));
+  const taskTableSql =
+    getOne<{ sql: string }>(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")?.sql ?? "";
+  const taskUpdateTableSql =
+    getOne<{ sql: string }>(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'task_updates'")?.sql ??
+    "";
+
+  const needsTaskWorkflowMigration =
+    !taskTableSql ||
+    taskTableSql.includes("'blocked'") ||
+    taskTableSql.includes("'done'") ||
+    !taskTableSql.includes("'backlog'") ||
+    !taskTableSql.includes("'completed'");
+  const needsTaskUpdateWorkflowMigration =
+    !taskUpdateTableSql ||
+    taskUpdateTableSql.includes("'blocked'") ||
+    taskUpdateTableSql.includes("'done'") ||
+    !taskUpdateTableSql.includes("'backlog'") ||
+    !taskUpdateTableSql.includes("'completed'");
+  const needsCurrentBlockers = !taskColumnNames.has("current_blockers");
+
+  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers) {
+    return;
+  }
+
+  const latestLegacyBlockerSql = `
+    (
+      SELECT tu.blockers
+      FROM task_updates_legacy tu
+      WHERE tu.task_id = tasks_legacy.id
+        AND TRIM(tu.blockers) != ''
+      ORDER BY tu.created_at DESC
+      LIMIT 1
+    )
+  `;
+  const currentBlockersSelect = taskColumnNames.has("current_blockers")
+    ? `
+        COALESCE(
+          NULLIF(TRIM(tasks_legacy.current_blockers), ''),
+          ${latestLegacyBlockerSql},
+          CASE
+            WHEN tasks_legacy.status = 'blocked' THEN 'Blocked without detail saved.'
+            ELSE ''
+          END
+        )
+      `
+    : `
+        COALESCE(
+          ${latestLegacyBlockerSql},
+          CASE
+            WHEN tasks_legacy.status = 'blocked' THEN 'Blocked without detail saved.'
+            ELSE ''
+          END
+        )
+      `;
+
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec("BEGIN");
+
+  try {
+    db.exec("ALTER TABLE task_updates RENAME TO task_updates_legacy");
+    db.exec("ALTER TABLE tasks RENAME TO tasks_legacy");
+
+    db.exec(`
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        strategy_id TEXT REFERENCES strategies(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+        status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
+        assignee_id TEXT NOT NULL REFERENCES users(id),
+        estimated_hours REAL NOT NULL DEFAULT 0,
+        actual_hours REAL NOT NULL DEFAULT 0,
+        due_date TEXT,
+        result_note TEXT NOT NULL DEFAULT '',
+        current_blockers TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`
+      CREATE TABLE task_updates (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
+        time_spent_hours REAL NOT NULL DEFAULT 0,
+        outcome TEXT NOT NULL DEFAULT '',
+        blockers TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec(`
+      INSERT INTO tasks (
+        id,
+        project_id,
+        strategy_id,
+        title,
+        description,
+        priority,
+        status,
+        assignee_id,
+        estimated_hours,
+        actual_hours,
+        due_date,
+        result_note,
+        current_blockers,
+        created_by,
+        created_at,
+        updated_at
+      )
+      SELECT
+        tasks_legacy.id,
+        tasks_legacy.project_id,
+        tasks_legacy.strategy_id,
+        tasks_legacy.title,
+        tasks_legacy.description,
+        tasks_legacy.priority,
+        CASE tasks_legacy.status
+          WHEN 'done' THEN 'completed'
+          WHEN 'blocked' THEN 'in_progress'
+          ELSE tasks_legacy.status
+        END,
+        tasks_legacy.assignee_id,
+        tasks_legacy.estimated_hours,
+        tasks_legacy.actual_hours,
+        tasks_legacy.due_date,
+        tasks_legacy.result_note,
+        ${currentBlockersSelect},
+        tasks_legacy.created_by,
+        tasks_legacy.created_at,
+        tasks_legacy.updated_at
+      FROM tasks_legacy
+    `);
+
+    db.exec(`
+      INSERT INTO task_updates (
+        id,
+        task_id,
+        user_id,
+        status,
+        time_spent_hours,
+        outcome,
+        blockers,
+        created_at
+      )
+      SELECT
+        task_updates_legacy.id,
+        task_updates_legacy.task_id,
+        task_updates_legacy.user_id,
+        CASE task_updates_legacy.status
+          WHEN 'done' THEN 'completed'
+          WHEN 'blocked' THEN 'in_progress'
+          ELSE task_updates_legacy.status
+        END,
+        task_updates_legacy.time_spent_hours,
+        task_updates_legacy.outcome,
+        task_updates_legacy.blockers,
+        task_updates_legacy.created_at
+      FROM task_updates_legacy
+    `);
+
+    db.exec("DROP TABLE task_updates_legacy");
+    db.exec("DROP TABLE tasks_legacy");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_tasks_assignee_id ON tasks(assignee_id)");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_task_updates_task_id ON task_updates(task_id)");
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+
+  await persistDb(db);
+}
+
+async function ensureAppSchema() {
+  const db = await ensureProjectSchema();
+  await ensureTaskWorkflowSchema(db);
   return db;
 }
 
