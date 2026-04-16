@@ -1,18 +1,11 @@
 import { Pool, type PoolClient } from "pg";
 
+import { getConfiguredConnectionString } from "@/lib/runtime-env";
+
 export type QueryParam = string | number | boolean | null;
 export type DbClient = Pool | PoolClient;
 
 let pool: Pool | null = null;
-
-function getConnectionString() {
-  return (
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.SUPABASE_DB_URL ||
-    ""
-  );
-}
 
 function needsSsl(connectionString: string) {
   return !connectionString.includes("localhost") && !connectionString.includes("127.0.0.1");
@@ -23,12 +16,7 @@ export async function getDb() {
     return pool;
   }
 
-  const connectionString = getConnectionString();
-  if (!connectionString) {
-    throw new Error(
-      "Database connection is not configured. Add DATABASE_URL in your environment variables before using Supabase/Postgres.",
-    );
-  }
+  const connectionString = getConfiguredConnectionString();
 
   pool = new Pool({
     connectionString,

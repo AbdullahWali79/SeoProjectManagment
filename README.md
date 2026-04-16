@@ -27,6 +27,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
 ```
 
+For local development, keep these in `.env.local`. This repo now also falls back to `.env.vercel` if that file exists.
+
+Important: `DATABASE_URL` must contain your real Supabase database password. A placeholder like `REPLACE_WITH_SUPABASE_DB_PASSWORD` will make login fail.
+
 Database setup:
 
 1. Open Supabase SQL Editor

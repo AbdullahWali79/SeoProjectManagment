@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 
 import { getDb, getOne } from "@/lib/db";
+import { getDatabaseSetupError } from "@/lib/runtime-env";
 import { clearSession, getSession, setSession } from "@/lib/session";
 
 export type AppRole = "admin" | "employee";
@@ -14,6 +15,11 @@ export type SessionUser = {
 };
 
 export async function loginWithPassword(email: string, password: string) {
+  const setupError = getDatabaseSetupError();
+  if (setupError) {
+    return { success: false as const, message: setupError };
+  }
+
   const db = await getDb();
   const user = await getOne<{
     id: string;
@@ -61,6 +67,11 @@ export async function logout() {
 export async function getCurrentUser(): Promise<SessionUser | null> {
   const session = await getSession();
   if (!session) {
+    return null;
+  }
+
+  if (getDatabaseSetupError()) {
+    await clearSession();
     return null;
   }
 

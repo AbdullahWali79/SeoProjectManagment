@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { getCurrentUser } from "@/lib/auth";
+import { getDatabaseSetupError } from "@/lib/runtime-env";
 import { LoginForm } from "@/components/login-form";
 
 export default async function LoginPage() {
@@ -8,6 +9,8 @@ export default async function LoginPage() {
   if (user) {
     redirect("/dashboard");
   }
+
+  const databaseSetupError = getDatabaseSetupError();
 
   return (
     <main className="shell">
@@ -57,6 +60,19 @@ export default async function LoginPage() {
             Sign in with the seeded admin or employee account once your Supabase database and environment variables are
             connected.
           </p>
+          {databaseSetupError ? (
+            <div
+              className="notice"
+              style={{
+                background: "rgba(185,28,28,0.1)",
+                color: "#991b1b",
+                borderColor: "rgba(185,28,28,0.18)",
+                marginBottom: 16,
+              }}
+            >
+              {databaseSetupError}
+            </div>
+          ) : null}
           <LoginForm />
         </div>
       </section>
