@@ -221,7 +221,7 @@ export function AdminWorkspaceShell({
     {
       href: "#admin-queue",
       label: "Queue",
-      note: "Track active work",
+      note: "Command center",
       icon: "list",
     },
     {
@@ -552,6 +552,7 @@ export function AdminWorkspaceShell({
                 Assign to
               </label>
               <select id="modal-task-assignee" name="assigneeId" className="select form-select">
+                <option value="">Unassigned for now</option>
                 {employeeOptions.map((employee) => (
                   <option key={employee.id} value={employee.id}>
                     {employee.fullName}

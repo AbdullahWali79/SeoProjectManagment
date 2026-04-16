@@ -49,10 +49,10 @@ export default async function DashboardPage({
   return (
     <main className="shell dashboard-shell">
       <section className={`panel dashboard-banner ${user.role === "admin" ? "dashboard-banner-admin" : "dashboard-banner-employee"}`}>
-        <div className="row g-4 align-items-center">
-          <div className="col-xl-8">
+        <div className="dashboard-banner-grid">
+          <div className="dashboard-banner-main">
             <div className="brand">
-          <p className="eyebrow">{user.role === "admin" ? "Admin workspace" : "Employee workspace"}</p>
+              <p className="eyebrow">{user.role === "admin" ? "Admin workspace" : "Employee workspace"}</p>
               <h1 className="display dashboard-banner-title">
                 {user.role === "admin"
                   ? "Manage projects, tasks, reports, and client progress in one place."
@@ -68,24 +68,22 @@ export default async function DashboardPage({
               </div>
             </div>
           </div>
-          <div className="col-xl-4">
-            <div className="dashboard-banner-side">
-              <div className="dashboard-kpi-grid">
-                <div className="dashboard-kpi">
-                  <span className="dashboard-kpi-label">{heroPrimaryLabel}</span>
-                  <strong className="dashboard-kpi-value">{heroPrimaryMetric}</strong>
-                </div>
-                <div className="dashboard-kpi">
-                  <span className="dashboard-kpi-label">{heroSecondaryLabel}</span>
-                  <strong className="dashboard-kpi-value">{heroSecondaryMetric}</strong>
-                </div>
+          <div className="dashboard-banner-side">
+            <div className="dashboard-kpi-grid">
+              <div className="dashboard-kpi">
+                <span className="dashboard-kpi-label">{heroPrimaryLabel}</span>
+                <strong className="dashboard-kpi-value">{heroPrimaryMetric}</strong>
               </div>
-              <form action={logoutAction}>
-                <button className="button button-ghost btn btn-light btn-lg w-100 shadow-sm" type="submit">
-                  Sign out
-                </button>
-              </form>
+              <div className="dashboard-kpi">
+                <span className="dashboard-kpi-label">{heroSecondaryLabel}</span>
+                <strong className="dashboard-kpi-value">{heroSecondaryMetric}</strong>
+              </div>
             </div>
+            <form action={logoutAction}>
+              <button className="button button-ghost btn btn-light btn-lg w-100 shadow-sm" type="submit">
+                Sign out
+              </button>
+            </form>
           </div>
         </div>
       </section>

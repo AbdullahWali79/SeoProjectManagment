@@ -62,7 +62,7 @@ const createTaskSchema = z.object({
   description: z.string().min(10),
   priority: z.enum(["low", "medium", "high", "urgent"]),
   status: z.enum(TASK_WORKFLOW_STATUSES),
-  assigneeId: z.string().min(1),
+  assigneeId: z.string().optional().transform((value) => value || null),
   estimatedHours: z.coerce.number().min(0),
   dueDate: z.string().optional().transform((value) => value || null),
 });
@@ -271,7 +271,7 @@ export async function updateTaskProgressAction(formData: FormData) {
   });
 
   const db = await getDb();
-  const task = getOne<{ assignee_id: string }>(
+  const task = getOne<{ assignee_id: string | null }>(
     db,
     "SELECT assignee_id FROM tasks WHERE id = ?",
     [parsed.taskId],

@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   description TEXT NOT NULL,
   priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
   status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
-  assignee_id TEXT NOT NULL REFERENCES users(id),
+  assignee_id TEXT REFERENCES users(id),
   estimated_hours REAL NOT NULL DEFAULT 0,
   actual_hours REAL NOT NULL DEFAULT 0,
   due_date TEXT,
@@ -119,6 +119,7 @@ if (!projectColumns.has("updated_at")) {
 function ensureTaskWorkflowSchema() {
   const taskColumnsResult = db.exec("PRAGMA table_info(tasks);");
   const taskColumns = new Set((taskColumnsResult[0]?.values ?? []).map((column) => String(column[1])));
+  const assigneeColumn = (taskColumnsResult[0]?.values ?? []).find((column) => String(column[1]) === "assignee_id");
   const taskTableSql = String(getRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", ["tasks"])?.sql ?? "");
   const taskUpdateTableSql = String(getRow("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?", ["task_updates"])?.sql ?? "");
   const needsTaskWorkflowMigration =
@@ -134,8 +135,9 @@ function ensureTaskWorkflowSchema() {
     !taskUpdateTableSql.includes("'backlog'") ||
     !taskUpdateTableSql.includes("'completed'");
   const needsCurrentBlockers = !taskColumns.has("current_blockers");
+  const needsNullableAssigneeMigration = Number(assigneeColumn?.[3] ?? 0) === 1;
 
-  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers) {
+  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers && !needsNullableAssigneeMigration) {
     return;
   }
 
@@ -190,7 +192,7 @@ function ensureTaskWorkflowSchema() {
         description TEXT NOT NULL,
         priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
         status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
-        assignee_id TEXT NOT NULL REFERENCES users(id),
+        assignee_id TEXT REFERENCES users(id),
         estimated_hours REAL NOT NULL DEFAULT 0,
         actual_hours REAL NOT NULL DEFAULT 0,
         due_date TEXT,

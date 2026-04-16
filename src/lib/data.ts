@@ -131,8 +131,9 @@ async function ensureProjectSchema() {
 }
 
 async function ensureTaskWorkflowSchema(db: Awaited<ReturnType<typeof getDb>>) {
-  const taskColumns = all<{ name: string }>(db, "PRAGMA table_info(tasks)");
+  const taskColumns = all<{ name: string; notnull: number }>(db, "PRAGMA table_info(tasks)");
   const taskColumnNames = new Set(taskColumns.map((column) => String(column.name)));
+  const assigneeColumn = taskColumns.find((column) => String(column.name) === "assignee_id");
   const taskTableSql =
     getOne<{ sql: string }>(db, "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")?.sql ?? "";
   const taskUpdateTableSql =
@@ -152,8 +153,9 @@ async function ensureTaskWorkflowSchema(db: Awaited<ReturnType<typeof getDb>>) {
     !taskUpdateTableSql.includes("'backlog'") ||
     !taskUpdateTableSql.includes("'completed'");
   const needsCurrentBlockers = !taskColumnNames.has("current_blockers");
+  const needsNullableAssigneeMigration = Number(assigneeColumn?.notnull ?? 0) === 1;
 
-  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers) {
+  if (!needsTaskWorkflowMigration && !needsTaskUpdateWorkflowMigration && !needsCurrentBlockers && !needsNullableAssigneeMigration) {
     return;
   }
 
@@ -204,7 +206,7 @@ async function ensureTaskWorkflowSchema(db: Awaited<ReturnType<typeof getDb>>) {
         description TEXT NOT NULL,
         priority TEXT NOT NULL CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
         status TEXT NOT NULL CHECK (status IN ('backlog', 'todo', 'in_progress', 'review', 'completed')),
-        assignee_id TEXT NOT NULL REFERENCES users(id),
+        assignee_id TEXT REFERENCES users(id),
         estimated_hours REAL NOT NULL DEFAULT 0,
         actual_hours REAL NOT NULL DEFAULT 0,
         due_date TEXT,
@@ -352,6 +354,7 @@ export async function getAdminDashboardData(reportDate?: string) {
     todayHours: number;
     blockedTasks: number;
     overdueTasks: number;
+    unassignedTasks: number;
     missingReports: number;
     archivedProjects: number;
   }>(
@@ -390,6 +393,14 @@ export async function getAdminDashboardData(reportDate?: string) {
             AND IFNULL(p.is_archived, 0) = 0
         ) AS overdueTasks,
         (
+          SELECT COUNT(*)
+          FROM tasks t
+          INNER JOIN projects p ON p.id = t.project_id
+          WHERE t.status != 'completed'
+            AND t.assignee_id IS NULL
+            AND IFNULL(p.is_archived, 0) = 0
+        ) AS unassignedTasks,
+        (
           (SELECT COUNT(*) FROM users WHERE role = 'employee' AND is_active = 1)
           -
           (
@@ -409,6 +420,7 @@ export async function getAdminDashboardData(reportDate?: string) {
     todayHours: 0,
     blockedTasks: 0,
     overdueTasks: 0,
+    unassignedTasks: 0,
     missingReports: 0,
     archivedProjects: 0,
   };
@@ -499,7 +511,7 @@ export async function getAdminDashboardData(reportDate?: string) {
         t.title,
         t.status,
         t.priority,
-        u.full_name AS assigneeName,
+        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
         t.due_date AS dueDate,
         t.estimated_hours AS estimatedHours,
         t.actual_hours AS actualHours,
@@ -508,7 +520,7 @@ export async function getAdminDashboardData(reportDate?: string) {
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
       LEFT JOIN strategies s ON s.id = t.strategy_id
-      INNER JOIN users u ON u.id = t.assignee_id
+      LEFT JOIN users u ON u.id = t.assignee_id
       WHERE IFNULL(p.is_archived, 0) = 0
       ORDER BY CASE
         WHEN t.status != 'completed' AND TRIM(IFNULL(t.current_blockers, '')) != '' THEN 0
@@ -679,13 +691,13 @@ export async function getAdminDashboardData(reportDate?: string) {
         t.id,
         t.title,
         p.name AS projectName,
-        u.full_name AS assigneeName,
+        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
         t.priority,
         t.due_date AS dueDate,
         t.result_note AS resultNote
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
-      INNER JOIN users u ON u.id = t.assignee_id
+      LEFT JOIN users u ON u.id = t.assignee_id
       WHERE t.status != 'completed'
         AND t.due_date IS NOT NULL
         AND t.due_date < ?
@@ -708,18 +720,45 @@ export async function getAdminDashboardData(reportDate?: string) {
         t.id,
         t.title,
         p.name AS projectName,
-        u.full_name AS assigneeName,
+        COALESCE(u.full_name, 'Unassigned') AS assigneeName,
         t.priority,
         t.due_date AS dueDate,
         t.result_note AS resultNote,
         t.current_blockers AS blockers
       FROM tasks t
       INNER JOIN projects p ON p.id = t.project_id
-      INNER JOIN users u ON u.id = t.assignee_id
+      LEFT JOIN users u ON u.id = t.assignee_id
       WHERE t.status != 'completed'
         AND TRIM(IFNULL(t.current_blockers, '')) != ''
         AND IFNULL(p.is_archived, 0) = 0
       ORDER BY t.due_date ASC, t.updated_at DESC
+      LIMIT 8
+    `,
+  );
+
+  const unassignedTasks = all<AdminTaskAlertRow>(
+    db,
+    `
+      SELECT
+        t.id,
+        t.title,
+        p.name AS projectName,
+        'Unassigned' AS assigneeName,
+        t.priority,
+        t.due_date AS dueDate,
+        t.result_note AS resultNote,
+        t.current_blockers AS blockers
+      FROM tasks t
+      INNER JOIN projects p ON p.id = t.project_id
+      WHERE t.status != 'completed'
+        AND t.assignee_id IS NULL
+        AND IFNULL(p.is_archived, 0) = 0
+      ORDER BY CASE t.priority
+        WHEN 'urgent' THEN 0
+        WHEN 'high' THEN 1
+        WHEN 'medium' THEN 2
+        ELSE 3
+      END, t.created_at DESC
       LIMIT 8
     `,
   );
@@ -787,6 +826,7 @@ export async function getAdminDashboardData(reportDate?: string) {
     workload,
     overdueTasks,
     blockedTasks,
+    unassignedTasks,
     reportMonitor,
     activeReportDate,
     availableReportDates: reportDateOptions,
@@ -1081,7 +1121,7 @@ export async function createTask(input: {
   description: string;
   priority: "low" | "medium" | "high" | "urgent";
   status: TaskWorkflowStatus;
-  assigneeId: string;
+  assigneeId: string | null;
   estimatedHours: number;
   dueDate: string | null;
   createdBy: string;

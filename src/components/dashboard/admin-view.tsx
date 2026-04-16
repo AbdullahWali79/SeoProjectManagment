@@ -35,6 +35,10 @@ function taskStatusLabel(value: string) {
   return getTaskStatusLabel(value);
 }
 
+function priorityLabel(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
 function isPastDate(value: string | null) {
   return Boolean(value && value < new Date().toISOString().slice(0, 10));
 }
@@ -173,6 +177,7 @@ export function AdminView({
   workload,
   overdueTasks,
   blockedTasks,
+  unassignedTasks,
   reportMonitor,
   activeReportDate,
   availableReportDates,
@@ -185,6 +190,7 @@ export function AdminView({
     todayHours: number;
     blockedTasks: number;
     overdueTasks: number;
+    unassignedTasks: number;
     missingReports: number;
     archivedProjects: number;
   };
@@ -208,6 +214,7 @@ export function AdminView({
   workload: AdminEmployeeWorkloadRow[];
   overdueTasks: AdminTaskAlertRow[];
   blockedTasks: AdminTaskAlertRow[];
+  unassignedTasks: AdminTaskAlertRow[];
   reportMonitor: AdminReportMonitorRow[];
   activeReportDate: string;
   availableReportDates: string[];
@@ -284,6 +291,7 @@ export function AdminView({
   const totalQueuedHours = workload.reduce((sum, member) => sum + member.queuedHours, 0);
   const workloadPeak = workload[0];
   const hasProjectSearch = projectSearch.trim().length > 0;
+  const commandCenterCount = stats.overdueTasks + stats.blockedTasks + stats.unassignedTasks;
 
   return (
     <AdminWorkspaceShell
@@ -315,7 +323,7 @@ export function AdminView({
                   Review report monitor
                 </a>
                 <a className="button button-ghost compact-button btn btn-light" href="#admin-queue">
-                  Check alerts
+                  Open command center
                 </a>
               </div>
             </div>
@@ -404,6 +412,11 @@ export function AdminView({
               <span className="eyebrow">Blocked tasks</span>
               <strong>{stats.blockedTasks}</strong>
               <p>Separate blocker tracking keeps blocked work visible without breaking the workflow.</p>
+            </article>
+            <article className="admin-central-card">
+              <span className="eyebrow">Unassigned tasks</span>
+              <strong>{stats.unassignedTasks}</strong>
+              <p>Execution items still waiting for an owner before delivery can begin.</p>
             </article>
             <article className="admin-central-card">
               <span className="eyebrow">Team workload</span>
@@ -556,68 +569,126 @@ export function AdminView({
         </section>
       </section>
 
-      <section className="admin-insight-grid">
-        <section className="panel section admin-insight-panel">
-          <div className="section-head">
-            <div className="section-copy">
-              <p className="eyebrow">Overdue alerts</p>
-              <h3>Tasks already past their due date</h3>
-              <p className="subtle">Use this list to jump straight into the items that need admin intervention today.</p>
+      <section id="admin-queue" className="panel section admin-command-panel">
+        <div className="section-head">
+          <div className="section-copy">
+            <p className="eyebrow">Overdue + blocked command center</p>
+            <h3>Immediate action items that need admin attention first</h3>
+            <p className="subtle">
+              Keep overdue work, blocker-heavy tasks, and unassigned execution items together so nothing urgent slips
+              past the top of the dashboard.
+            </p>
+          </div>
+        </div>
+        <div className="summary-inline admin-command-summary">
+          <span className="pill pill-status-overdue">{stats.overdueTasks} overdue</span>
+          <span className="pill pill-status-blocked">{stats.blockedTasks} blocked</span>
+          <span className="pill pill-status-planning">{stats.unassignedTasks} unassigned</span>
+          <span className="pill pill-status-review">{commandCenterCount} total action items</span>
+        </div>
+        <div className="admin-command-grid">
+          <article className="admin-command-card admin-command-card-overdue">
+            <div className="admin-command-head">
+              <div>
+                <p className="eyebrow">Overdue tasks</p>
+                <h4>Past due and waiting</h4>
+              </div>
+              <strong>{stats.overdueTasks}</strong>
             </div>
-          </div>
-          <div className="admin-brief-list">
-            {overdueTasks.length ? (
-              overdueTasks.map((task) => (
-                <article key={task.id} className="admin-brief-item">
-                  <div>
-                    <strong>{task.title}</strong>
-                    <p className="subtle mini">
-                      {task.assigneeName} | {task.projectName}
-                    </p>
-                    <p className="subtle mini">{task.resultNote || "Awaiting update"}</p>
-                  </div>
-                  <div className="admin-brief-meta">
-                    <span className="pill pill-status-overdue">{task.priority} priority</span>
-                    <span className="subtle mini">{task.dueDate || "No due date"}</span>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="subtle">No overdue tasks right now.</p>
-            )}
-          </div>
-        </section>
+            <p className="subtle admin-command-copy">
+              Move here first when you need to rescue delivery dates and follow up with the current owner immediately.
+            </p>
+            <div className="admin-command-list">
+              {overdueTasks.length ? (
+                overdueTasks.map((task) => (
+                  <article key={task.id} className="admin-command-item">
+                    <div>
+                      <strong>{task.title}</strong>
+                      <p className="subtle mini">
+                        {task.assigneeName} | {task.projectName}
+                      </p>
+                      <p className="subtle mini">{task.resultNote || "Awaiting update"}</p>
+                    </div>
+                    <div className="admin-brief-meta">
+                      <span className="pill pill-status-overdue">{priorityLabel(task.priority)} priority</span>
+                      <span className="subtle mini">{task.dueDate || "No due date"}</span>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="report-empty">No overdue tasks right now.</div>
+              )}
+            </div>
+          </article>
 
-        <section className="panel section admin-insight-panel">
-          <div className="section-head">
-            <div className="section-copy">
-              <p className="eyebrow">Blocked tasks panel</p>
-              <h3>Execution items waiting on unblock</h3>
-              <p className="subtle">Latest blocker notes stay visible here so you can clear dependencies without opening each task.</p>
+          <article className="admin-command-card admin-command-card-blocked">
+            <div className="admin-command-head">
+              <div>
+                <p className="eyebrow">Blocked tasks</p>
+                <h4>Waiting on unblock</h4>
+              </div>
+              <strong>{stats.blockedTasks}</strong>
             </div>
-          </div>
-          <div className="admin-brief-list">
-            {blockedTasks.length ? (
-              blockedTasks.map((task) => (
-                <article key={task.id} className="admin-brief-item">
-                  <div>
-                    <strong>{task.title}</strong>
-                    <p className="subtle mini">
-                      {task.assigneeName} | {task.projectName}
-                    </p>
-                    <p className="subtle mini">{task.blockers}</p>
-                  </div>
-                  <div className="admin-brief-meta">
-                    <span className="pill pill-status-blocked">Blocked</span>
-                    <span className="subtle mini">{task.dueDate || "No due date"}</span>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <p className="subtle">No blocked tasks at the moment.</p>
-            )}
-          </div>
-        </section>
+            <p className="subtle admin-command-copy">
+              Latest blocker notes stay visible here so you can clear dependencies without opening every single task.
+            </p>
+            <div className="admin-command-list">
+              {blockedTasks.length ? (
+                blockedTasks.map((task) => (
+                  <article key={task.id} className="admin-command-item">
+                    <div>
+                      <strong>{task.title}</strong>
+                      <p className="subtle mini">
+                        {task.assigneeName} | {task.projectName}
+                      </p>
+                      <p className="subtle mini">{task.blockers || "Blocked without detail yet."}</p>
+                    </div>
+                    <div className="admin-brief-meta">
+                      <span className="pill pill-status-blocked">Blocked</span>
+                      <span className="subtle mini">{task.dueDate || "No due date"}</span>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="report-empty">No blocked tasks at the moment.</div>
+              )}
+            </div>
+          </article>
+
+          <article className="admin-command-card admin-command-card-unassigned">
+            <div className="admin-command-head">
+              <div>
+                <p className="eyebrow">Unassigned tasks</p>
+                <h4>Ready but owner missing</h4>
+              </div>
+              <strong>{stats.unassignedTasks}</strong>
+            </div>
+            <p className="subtle admin-command-copy">
+              These tasks are in the system but still waiting for ownership, so they cannot move through delivery yet.
+            </p>
+            <div className="admin-command-list">
+              {unassignedTasks.length ? (
+                unassignedTasks.map((task) => (
+                  <article key={task.id} className="admin-command-item">
+                    <div>
+                      <strong>{task.title}</strong>
+                      <p className="subtle mini">
+                        {task.assigneeName} | {task.projectName}
+                      </p>
+                      <p className="subtle mini">{task.resultNote || "No update logged yet."}</p>
+                    </div>
+                    <div className="admin-brief-meta">
+                      <span className="pill pill-status-planning">{priorityLabel(task.priority)} priority</span>
+                      <span className="subtle mini">{task.dueDate || "No due date"}</span>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div className="report-empty">No unassigned tasks waiting for ownership.</div>
+              )}
+            </div>
+          </article>
+        </div>
       </section>
 
       <section className="stack">
@@ -706,7 +777,7 @@ export function AdminView({
           </div>
         </section>
 
-        <section id="admin-queue" className="panel section table-section">
+        <section className="panel section table-section">
           <div className="section-head">
             <div className="section-copy">
               <p className="eyebrow">Execution queue</p>

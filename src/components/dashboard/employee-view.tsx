@@ -51,13 +51,13 @@ export function EmployeeView({
       }}
     >
       <section id="employee-overview" className="panel employee-hero">
-        <div className="row g-4 align-items-stretch">
-          <div className="col-xl-7">
+        <div className="employee-hero-grid">
+          <div className="employee-hero-main">
             <div className="employee-hero-copy">
               <p className="eyebrow">Delivery workspace</p>
-              <h2>Work from a focused employee desk with the same clean layout but only your own task and report tools.</h2>
+              <h2>Run your delivery desk with a clean task queue and daily reporting flow.</h2>
               <p className="subtle">
-                Move between your assigned tasks, daily reporting, and recent updates without stepping into admin controls.
+                Keep updates, blockers, and report notes in one tidy workspace without stepping into admin controls.
               </p>
               <div className="employee-hero-actions d-flex flex-wrap gap-2">
                 <a className="button button-ghost compact-button btn btn-light" href="#employee-reporting">
@@ -72,58 +72,50 @@ export function EmployeeView({
               </div>
             </div>
           </div>
-          <div className="col-xl-5">
-            <div className="row g-3 h-100">
-              <div className="col-sm-6">
-                <div className="employee-mini-card employee-mini-card-primary h-100">
-                  <span className="eyebrow">Tasks active</span>
-                  <strong>{activeTasks.length}</strong>
-                  <p>Assigned tasks currently moving through your workflow.</p>
-                </div>
+          <div className="employee-hero-side">
+            <div className="employee-hero-metrics h-100">
+              <div className="employee-mini-card employee-mini-card-primary h-100">
+                <span className="eyebrow">Tasks active</span>
+                <strong>{activeTasks.length}</strong>
+                <p>Tasks currently moving through your workflow.</p>
               </div>
-              <div className="col-sm-6">
-                <div className="employee-mini-card employee-mini-card-accent h-100">
-                  <span className="eyebrow">Reports sent</span>
-                  <strong>{reports.length}</strong>
-                  <p>Daily reports already visible to the admin.</p>
-                </div>
+              <div className="employee-mini-card employee-mini-card-accent h-100">
+                <span className="eyebrow">Reports sent</span>
+                <strong>{reports.length}</strong>
+                <p>Daily reports already visible to the admin.</p>
               </div>
-              <div className="col-sm-6">
-                <div className="employee-mini-card h-100">
-                  <span className="eyebrow">Projects assigned</span>
-                  <strong>{projectOptions.length}</strong>
-                  <p>Projects currently attached to your task list.</p>
-                </div>
+              <div className="employee-mini-card h-100">
+                <span className="eyebrow">Projects assigned</span>
+                <strong>{projectOptions.length}</strong>
+                <p>Projects currently attached to your task list.</p>
               </div>
-              <div className="col-sm-6">
-                <div className="employee-mini-card h-100">
-                  <span className="eyebrow">Hours reported</span>
-                  <strong>{totalReportedHours}</strong>
-                  <p>Total hours already submitted through your daily reports.</p>
-                </div>
+              <div className="employee-mini-card h-100">
+                <span className="eyebrow">Hours reported</span>
+                <strong>{totalReportedHours}</strong>
+                <p>Total hours already submitted through your daily reports.</p>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="grid grid-4 stat-grid">
-        <div className="panel stat-card stat-card-projects">
+      <section className="grid grid-4 stat-grid employee-stat-grid">
+        <div className="panel stat-card employee-stat-card employee-stat-card-projects">
           <p className="eyebrow">Assigned projects</p>
           <p className="metric">{projectOptions.length}</p>
           <p className="subtle">Project spaces currently assigned to you.</p>
         </div>
-        <div className="panel stat-card stat-card-tasks">
+        <div className="panel stat-card employee-stat-card employee-stat-card-tasks">
           <p className="eyebrow">My task queue</p>
           <p className="metric">{activeTasks.length}</p>
           <p className="subtle">Tasks still moving inside your workflow.</p>
         </div>
-        <div className="panel stat-card stat-card-team">
+        <div className="panel stat-card employee-stat-card employee-stat-card-team">
           <p className="eyebrow">Reports sent</p>
           <p className="metric">{reports.length}</p>
           <p className="subtle">Daily submissions already visible to the admin.</p>
         </div>
-        <div className="panel stat-card stat-card-hours">
+        <div className="panel stat-card employee-stat-card employee-stat-card-hours">
           <p className="eyebrow">Hours logged</p>
           <p className="metric">{totalReportedHours}</p>
           <p className="subtle">Total hours already submitted through your reports.</p>
@@ -141,13 +133,18 @@ export function EmployeeView({
           </div>
           <div className="employee-focus-list">
             {focusTasks.length ? (
-              focusTasks.map((task) => (
+              focusTasks.map((task, index) => (
                 <article key={task.id} className="employee-focus-item">
-                  <div>
-                    <strong>{task.title}</strong>
+                  <div className="employee-focus-copy">
+                    <span className="employee-focus-index">Focus {index + 1}</span>
+                    <strong className="employee-focus-title">{task.title}</strong>
                     <p className="subtle mini">
                       {task.projectName} | {task.strategyTitle || "No linked strategy"}
                     </p>
+                    <div className="employee-focus-flags">
+                      <span className="pill pill-status-planning">Priority: {task.priority}</span>
+                      {task.currentBlockers ? <span className="pill pill-status-blocked">Blocked</span> : null}
+                    </div>
                   </div>
                   <div className="employee-focus-meta">
                     <span className={`pill pill-status-${task.status}`}>{statusLabel(task.status)}</span>
@@ -170,18 +167,21 @@ export function EmployeeView({
             </div>
           </div>
           <div className="mini-list">
-            <div className="mini-item">
+            <article className="mini-item employee-guide-item employee-guide-item-olive">
+              <span className="employee-guide-kicker">01</span>
               <strong>Update active tasks first</strong>
               <p className="subtle">Log hours, blockers, and outcomes directly inside each task card.</p>
-            </div>
-            <div className="mini-item">
+            </article>
+            <article className="mini-item employee-guide-item employee-guide-item-gold">
+              <span className="employee-guide-kicker">02</span>
               <strong>Write clear result notes</strong>
               <p className="subtle">Use short plain-English summaries the admin can forward without rewriting.</p>
-            </div>
-            <div className="mini-item">
+            </article>
+            <article className="mini-item employee-guide-item employee-guide-item-sky">
+              <span className="employee-guide-kicker">03</span>
               <strong>Report the next step</strong>
               <p className="subtle">Mention the immediate next action so the queue stays predictable for tomorrow.</p>
-            </div>
+            </article>
           </div>
         </section>
       </section>
@@ -201,22 +201,22 @@ export function EmployeeView({
           <span className="pill pill-status-done">{totalReportedHours}h logged</span>
         </div>
         <div className="summary-grid">
-          <div className="summary-card">
+          <div className="summary-card employee-summary-card employee-summary-card-projects">
             <p className="eyebrow">Projects</p>
             <p className="summary-value">{projectOptions.length}</p>
             <p className="subtle">Projects currently assigned to you.</p>
           </div>
-          <div className="summary-card">
+          <div className="summary-card employee-summary-card employee-summary-card-reports">
             <p className="eyebrow">Reports sent</p>
             <p className="summary-value">{reports.length}</p>
             <p className="subtle">Saved daily reports already visible to the admin.</p>
           </div>
-          <div className="summary-card">
+          <div className="summary-card employee-summary-card employee-summary-card-hours">
             <p className="eyebrow">Hours submitted</p>
             <p className="summary-value">{totalReportedHours}</p>
             <p className="subtle">Total hours reflected in your reports so far.</p>
           </div>
-          <div className="summary-card">
+          <div className="summary-card employee-summary-card employee-summary-card-total">
             <p className="eyebrow">Total tasks</p>
             <p className="summary-value">{tasks.length}</p>
             <p className="subtle">Everything currently attached to your account.</p>
@@ -238,18 +238,17 @@ export function EmployeeView({
         <div className="stack">
           {tasks.length ? (
             tasks.map((task) => (
-              <article key={task.id} className="task-card task-card-strong">
-                <div className="task-header">
-                  <div>
-                    <h3 style={{ margin: 0 }}>{task.title}</h3>
-                    <p className="subtle" style={{ marginBottom: 0 }}>
-                      {task.projectName} | {task.strategyTitle || "No linked strategy"}
-                    </p>
+              <article key={task.id} className="task-card task-card-strong employee-task-card">
+                <div className="task-header employee-task-header">
+                  <div className="employee-task-heading">
+                    <p className="eyebrow employee-task-kicker">{task.projectName}</p>
+                    <h3 className="employee-task-title">{task.title}</h3>
+                    <p className="subtle employee-task-strategy">{task.strategyTitle || "No linked strategy"}</p>
                   </div>
-                  <span className={`pill pill-status-${task.status}`}>{statusLabel(task.status)}</span>
+                  <span className={`pill pill-status-${task.status} employee-task-status`}>{statusLabel(task.status)}</span>
                 </div>
-                <p style={{ margin: 0 }}>{task.description}</p>
-                <div className="task-meta">
+                <p className="employee-task-description">{task.description}</p>
+                <div className="task-meta employee-task-meta">
                   <span className="pill pill-status-planning">Priority: {task.priority}</span>
                   <span className="pill pill-status-review">Due: {task.dueDate || "No due date"}</span>
                   <span className="pill pill-status-active">
@@ -262,7 +261,7 @@ export function EmployeeView({
                     <p className="subtle mini">{task.currentBlockers}</p>
                   </div>
                 ) : null}
-                <form action={updateTaskProgressAction} className="form-grid">
+                <form action={updateTaskProgressAction} className="form-grid employee-task-form">
                   <input type="hidden" name="taskId" value={task.id} />
                   <div className="field">
                     <label className="label" htmlFor={`status-${task.id}`}>
@@ -338,13 +337,13 @@ export function EmployeeView({
         <div className="report-list">
           {recentReports.length ? (
             recentReports.map((report) => (
-              <article key={report.id} className="report-card">
+              <article key={report.id} className="report-card employee-report-card">
                 <div className="report-meta">
                   <span className="pill pill-status-planning">{report.reportDate}</span>
                   <span className="pill pill-status-review">{report.totalHours}h logged</span>
                 </div>
-                <strong>{report.projectName}</strong>
-                <p>{report.summary}</p>
+                <strong className="employee-report-title">{report.projectName}</strong>
+                <p className="employee-report-summary">{report.summary}</p>
                 <p className="subtle mini">Next: {report.nextSteps}</p>
               </article>
             ))
