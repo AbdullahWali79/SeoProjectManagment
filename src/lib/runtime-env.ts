@@ -67,11 +67,11 @@ export function getDatabaseSetupError() {
   const connectionString = getConnectionString();
 
   if (!connectionString) {
-    return "Database configured nahi hai. Local run ke liye real `DATABASE_URL` `.env.local` ya `.env.vercel` mein add karo.";
+    return "Database configured nahi hai. Local ke liye real `DATABASE_URL` `.env.local` ya `.env.vercel` mein add karo, aur Vercel par Project Settings > Environment Variables mein `DATABASE_URL` set karo.";
   }
 
   if (hasPlaceholderDatabasePassword(connectionString)) {
-    return "`.env.vercel` mein `DATABASE_URL` abhi placeholder password par hai. Supabase ka real database password lagaye baghair login nahi chalega.";
+    return "`DATABASE_URL` abhi placeholder password par hai. Supabase ka real database password local env ya Vercel environment variables mein lagaye baghair login nahi chalega.";
   }
 
   return null;
